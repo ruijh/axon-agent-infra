@@ -10,12 +10,14 @@
 (function () {
   const KEY_STORE = "axon_api_key";
   const LIVE = {
+    mode: "boot",            // boot | real | sim
     connected: false, meta: null, key: localStorage.getItem(KEY_STORE) || "",
     sse: null, timers: [], evtItems: [],
   };
   window.AXON_LIVE = LIVE;
 
   async function api(method, path, body) {
+    if (LIVE.mode === "sim") return window.AXON_LIVE_SIM.call(method, path, body);
     const res = await fetch(path, {
       method,
       headers: { "Content-Type": "application/json", ...(LIVE.key ? { Authorization: `Bearer ${LIVE.key}` } : {}) },
@@ -48,6 +50,18 @@
   function renderConn() {
     const box = $("#live-conn");
     if (!box) return;
+    if (LIVE.mode === "sim") {
+      box.innerHTML = `<span class="badge warn"><i class="led led-warn"></i>SIM · 模拟控制平面</span>
+        <button class="btn tiny ghost" id="live-refresh">检测真实服务端</button>`;
+      $("#live-refresh").onclick = probe;
+      const hint = $("#live-hint");
+      hint.hidden = false;
+      hint.className = "alert-strip";
+      hint.innerHTML = `当前为<b>内置模拟控制平面</b>（GitHub Pages 在线演示形态）：状态机、能力门控（451）、opId 三段式、
+        事件流均为前端复刻语义，数据非真实采集。本地运行 <code>node server/index.mjs</code> 后点「检测真实服务端」
+        可切换为真实 REST/SSE 控制平面。<span class="dim">可直接体验：创建任务 → 认领 → 审批门 → 终态；对 ag-ops/ag-risk 的运行任务点「检查点暂存」看 451 门控。</span>`;
+      return;
+    }
     box.innerHTML = LIVE.connected
       ? `<span class="badge ok"><i class="led led-ok"></i>控制平面已连接 · v${LIVE.meta?.version || "?"}</span>`
       : `<span class="badge crit"><i class="led led-crit"></i>控制平面未连接</span>`;
@@ -272,22 +286,51 @@
 
   /* ── 生命周期 ─────────────────────────────────────────── */
   async function probe() {
+    disconnectSse();
+    // 必须直连真实端点：sim 模式下 api() 会路由到模拟引擎
     try {
-      const r = await api("GET", "/api/v1/meta");
-      if (r.ok) { LIVE.connected = true; LIVE.meta = r.json; }
+      const res = await fetch("/api/v1/meta");
+      if (res.ok) { LIVE.connected = true; LIVE.meta = await res.json(); LIVE.mode = "real"; }
       else throw new Error();
     } catch { LIVE.connected = false; LIVE.meta = null; }
-    renderConn();
+
     if (LIVE.connected) {
+      renderConn();
       renderAgents(); renderTasks(); renderOps(); connectSse();
       const d = $("#live-task-dot"); if (d) d.hidden = false;
-    } else {
-      disconnectSse();
-      ["#live-agents", "#live-tasks"].forEach(s => { const n = $(s); if (n) n.innerHTML = ""; });
-      const hint = `<tr><td colspan="5" class="dim" style="text-align:center;padding:18px">未连接 · 见上方指引</td></tr>`;
-      const ta = $("#live-tasks"); if (ta) ta.innerHTML = hint;
-      const ag = $("#live-agents"); if (ag) ag.innerHTML = hint.replace('colspan="5"', 'colspan="4"');
-      const d = $("#live-task-dot"); if (d) d.hidden = true;
+      return;
+    }
+    if (window.AXON_LIVE_SIM) { enterSim(); return; }   // 线上/纯静态形态：内置模拟控制平面
+    LIVE.mode = "boot";
+    renderConn();
+    ["#live-agents", "#live-tasks"].forEach(s => { const n = $(s); if (n) n.innerHTML = ""; });
+    const hint = `<tr><td colspan="5" class="dim" style="text-align:center;padding:18px">未连接 · 见上方指引</td></tr>`;
+    const ta = $("#live-tasks"); if (ta) ta.innerHTML = hint;
+    const ag = $("#live-agents"); if (ag) ag.innerHTML = hint.replace('colspan="5"', 'colspan="4"');
+    const d = $("#live-task-dot"); if (d) d.hidden = true;
+  }
+
+  function enterSim() {
+    LIVE.mode = "sim";
+    LIVE.connected = true;
+    LIVE.meta = window.AXON_LIVE_SIM.meta();
+    renderConn();
+    renderAgents(); renderTasks(); renderOps();
+    const d = $("#live-task-dot"); if (d) d.hidden = false;
+    window.AXON_LIVE_SIM.start(handleSimEvent);
+  }
+
+  /* 模拟引擎事件 → 与真实 SSE 相同的呈现路径 */
+  function handleSimEvent(evt) {
+    if (evt.kind === "op" && evt.op) {
+      const d = $("#live-evt-dot"); if (d) d.hidden = false;
+      pushFeed({ ts: evt.op.ts, tag: "操作", cls: "info",
+        msg: `<b>${esc(evt.op.opId)}</b> ${esc(evt.op.status)} · ${esc(evt.op.label)}` });
+      if (AXON.view === "live") renderOps();
+    } else if (evt.item && (evt.kind === "task" || evt.kind === "policy")) {
+      const d = $("#live-evt-dot"); if (d) d.hidden = false;
+      pushFeed({ ts: evt.item.ts, tag: evt.kind === "task" ? "任务" : "策略", cls: evt.item.cls, msg: evt.item.msg });
+      if (evt.kind === "task" && AXON.view === "live") renderTasks();
     }
   }
 
@@ -305,18 +348,29 @@
     else { stopTimers(); disconnectSse(); }
   });
 
-  /* 顶栏 LIVE 徽标（连接后点亮，不影响演示模式其余部分） */
-  setInterval(async () => {
-    let ok = false;
-    try { ok = (await fetch("/api/v1/meta")).ok; } catch { ok = false; }
+  /* 顶栏 LIVE 徽标（真实=绿 / 模拟=琥珀；不影响演示模式其余部分） */
+  function ensurePill(text, cls, title) {
     let pill = $("#live-pill");
-    if (ok && !pill) {
-      pill = el("span", "badge ok", "LIVE · 控制平面");
+    if (!text) { if (pill) pill.remove(); return; }
+    if (!pill) {
+      pill = el("span", "badge " + cls, text);
       pill.id = "live-pill";
       pill.style.cursor = "pointer";
-      pill.title = "server/ 控制平面运行中 · 点击进入接入面";
       pill.onclick = () => AXON.nav("live");
       $(".top-right").appendChild(pill);
-    } else if (!ok && pill) pill.remove();
+    }
+    pill.className = "badge " + cls;
+    pill.textContent = text;
+    pill.title = title;
+  }
+  setInterval(async () => {
+    if (LIVE.mode === "sim") {   // 模拟形态：不再探测真实端点（避免线上 404 噪音），点视图内按钮可切回
+      ensurePill("LIVE · 模拟演示", "warn", "内置模拟控制平面（在线演示形态）· 点击进入接入面");
+      return;
+    }
+    let ok = false;
+    try { ok = (await fetch("/api/v1/meta")).ok; } catch { ok = false; }
+    if (ok) ensurePill("LIVE · 控制平面", "ok", "server/ 控制平面运行中 · 点击进入接入面");
+    else ensurePill(null);
   }, 5000);
 })();

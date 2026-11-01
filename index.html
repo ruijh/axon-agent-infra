@@ -288,7 +288,7 @@
         <div class="view-head row">
           <div>
             <h1>接入面 · Live 控制平面</h1>
-            <p class="view-sub">REST + SSE + CLI + MCP + Worker 五接口同源 —— 与前七个视图的模拟世界共用一套 SPEC 语义（真实数据，需运行服务端）</p>
+            <p class="view-sub">REST + SSE + CLI + MCP + Worker 五接口同源 —— 本地连接真实控制平面；服务端不可达时（如 GitHub Pages）自动切换<b>内置模拟控制平面</b>，演示语义一致</p>
           </div>
           <div class="live-conn" id="live-conn"></div>
         </div>
@@ -353,6 +353,7 @@
 <script src="assets/net.js"></script>
 <script src="assets/dc3d.js"></script>
 <script src="assets/flow.js"></script>
+<script src="assets/livesim.js"></script>
 <script src="assets/live.js"></script>
 </body>
 </html>

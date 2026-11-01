@@ -427,7 +427,7 @@ status:
 | CLI | `node cli.mjs <command>` | setup / keys / tasks / create-task / approve / impact / ops / events / maintenance |
 | MCP Server | `node mcp/server.mjs`（stdio JSON-RPC） | 8 工具：状态 / **影响分析** / 能力查询 / 队列 / 认领 / 回报 / 审批 / 策略事件 |
 | Worker 接入 | `node worker/worker.mjs` | pull 模型参照 mission-control：register（caps）→ heartbeat → queue → claim → 汇报 → 终态 |
-| UI | 侧栏「接入面 · Live」 | 真实数据视图：状态机操作、opId 三段式、SSE 事件流；错误码原样透出 |
+| UI | 侧栏「接入面 · Live」 | 真实数据视图：状态机操作、opId 三段式、SSE 事件流；错误码原样透出。服务端不可达时（如静态托管）自动降级为**内置模拟控制平面**（前端复刻同一状态机/门控/三段式语义，仅用于线上演示，UI 以 SIM 徽标显式标注） |
 
 机器角色 `agent`（§9.3 之外新增）：仅允许心跳、认领、进度/终态回报、自注册——**任务创建仍归属平台/负责人角色**（与 mission-control 的任意 Key 建任务不同，AXON 保持治理边界）。
 
