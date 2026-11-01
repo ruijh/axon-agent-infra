@@ -1,25 +1,61 @@
-# AXON · Agent Infra 控制中心（MVP Demo）
+# AXON · Agent Infra 控制中心
 
-**在线访问：** <https://ruijh.github.io/axon-agent-infra/>（GitHub Pages 部署，数据为内置模拟）
+**在线访问（演示 UI）：** <https://ruijh.github.io/axon-agent-infra/>（GitHub Pages 部署，数据为内置模拟）
 
-基于《面向 Agent 与 Agent 工作负载的系统管理软件需求调研报告》开发的**任务控制室风格**全栈管理平台 MVP。零依赖、纯静态单页应用，双击即可运行。
+基于《面向 Agent 与 Agent 工作负载的系统管理软件需求调研报告》开发的**任务控制室风格**全栈管理平台。v0.95 起包含两部分：
 
-> **数据声明：本 Demo 为纯前端原型。所有服务器、Agent、任务、指标、事件均为内置模拟数据（`assets/data.js` 中的静态世界模型 + 2 秒节拍的模拟引擎生成），非真实采集；页面不发起任何对外网络请求。界面中的"遥测/告警/审计"等词汇均为对真实产品形态的概念演示。**
+- **演示 UI（纯静态）**：零依赖、纯前端单页应用，双击 `index.html` 即可运行。前七个视图（服务器/总览/拓扑/资产/任务/维护/治理）为内置模拟数据；
+- **控制平面（真实服务）**：`node server/index.mjs` 一条命令启动，提供 **REST API + SSE + OpenAPI 文档 + CLI + MCP Server + Worker 接入闭环**（对标 builderz-labs/mission-control 的多接口交付形态，管理语义按 AXON 自有 SPEC 执行）。UI 第八个视图「接入面 · Live」连接该真实控制平面。
 
-> **产品定义：管理语义与接口契约见 [SPEC.md](SPEC.md)《AXON 统一对象与 API 规范》v0.9**——统一对象模型、能力声明接口、任务状态机、声明式对象（Sandbox/AgentDeployment/TaskRun CRD 映射）、路由与策略模型、API 资源面，并附 Demo 覆盖度对照与开源项目对齐映射（OpenSandbox / agent-sandbox / agentgateway / kagent）。
+> **数据声明：前七个视图为纯前端原型**，所有服务器、Agent、任务、指标、事件均为内置模拟数据（`assets/data.js` 中的静态世界模型 + 2 秒节拍的模拟引擎生成），非真实采集，页面不发起任何对外网络请求。「接入面 · Live」视图的数据来自本机控制平面（`server/`，SQLite 存储），为真实 API 数据。
+
+> **产品定义：管理语义与接口契约见 [SPEC.md](SPEC.md)《AXON 统一对象与 API 规范》v0.95**——统一对象模型、能力声明接口、任务状态机、声明式对象（Sandbox/AgentDeployment/TaskRun CRD 映射）、路由与策略模型、API 资源面，并附 Demo 覆盖度对照与开源项目对齐映射（OpenSandbox / agent-sandbox / agentgateway / kagent / mission-control）。
 
 ## 运行方式
 
-**方式一（最简单）：** 直接双击 `index.html` 在浏览器中打开。
-
-**方式二（本地服务）：**
+**方式一（控制平面 + 完整 UI，推荐）：**
 ```bash
 cd "E:\Agent Infra Pilot"
+node server/index.mjs            # 零 npm 依赖，同时提供 UI 与 /api/v1，默认 8437 端口
+# 浏览器访问 http://127.0.0.1:8437/  → 侧栏「接入面 · Live」
+
+node cli.mjs setup               # 首次初始化：创建根密钥（token 仅显示一次）
+node cli.mjs keys create worker agent          # 为 Worker 创建 agent 角色密钥
+AXON_API_KEY=<agent密钥> node worker/worker.mjs   # 启动接入演示 Agent（心跳/认领/审批门/终态）
+```
+在 Live 视图填入 root 密钥后即可：创建任务 → 观察 Worker 认领 → 审批续跑 → 三段式操作记录 → SSE 实时事件。
+
+**方式二（纯静态演示，不带控制平面）：** 直接双击 `index.html`，或
+```bash
 python _serve.py        # 或 python -m http.server 8437
-# 浏览器访问 http://127.0.0.1:8437/
 ```
 
-> 无需安装任何依赖。所有数据为内置模拟数据（非真实采集），页面内置 2 秒节奏的模拟数据引擎（任务推进、指标波动、事件流）。首屏有约 2 秒的启动序列，点击可跳过。
+**测试（SPEC 硬约束的可执行验证）：**
+```bash
+node --test tests/invariants.test.mjs    # 19 项：451 能力门控 / 409 状态机 / 412 维护前置 / 429 配额 / 幂等 / 权重恒等 100 / GC 保护…
+```
+
+## 控制平面架构（v0.95 新增，参考 mission-control 落地）
+
+```
+server/index.mjs      入口：静态 UI + /api/v1 + SSE 同进程；--reset 重置数据，--port 自定义
+server/api.mjs        REST 资源面（SPEC §9.1）：路由表 + 鉴权 + 幂等 + 错误信封（409/412/429/451）
+server/store.mjs      存储：node:sqlite（WAL）零依赖；JSON 列模式，无需建表迁移
+server/auth.mjs       API Key + 六角色权限矩阵（SPEC §9.3 + 机器角色 agent）；/setup 首管理员
+server/statemachine.mjs 任务状态机（§5）：合法迁移表 + 审批重检 / 检查点兼容 / 强推二次确认
+server/ops.mjs        opId 三段式执行器（§4.3）：accepted → executed → verified；维护/路由/沙箱对账/GC
+server/impact.mjs     影响分析（§3.3）：反向可达 + 分层统计（含不可中断任务数）
+server/model.mjs      世界模型种子（与演示 UI 数据同源）
+server/openapi.mjs    OpenAPI 3.1（/api/v1/openapi.json）+ 内联文档页（/api/v1/docs）
+server/sse.mjs        SSE 事件流（event: policy / task / op）
+cli.mjs               命令行：setup / keys / tasks / create-task / approve / impact / ops / events / maintenance
+worker/worker.mjs     Agent 接入闭环（pull 模型）：注册 caps → 心跳 → 认领 → 汇报 → 审批门 → 终态
+mcp/server.mjs        MCP Server（stdio）：8 工具，含 axon_impact_analysis（Agent 行动前查影响面）
+tests/                规范不变量测试（node:test）
+assets/live.js        UI「接入面 · Live」视图（真实数据 + SSE + 状态机操作）
+```
+
+与 mission-control 的关键差异：接入模型同为 pull（register/queue/claim/heartbeat），但 AXON 的每次操作受**能力声明（caps）+ 角色权限 + 状态机**三重门控，且提供其不具备的**影响分析**接口（MCP 工具 `axon_impact_analysis`，供 Agent 在高危动作前自查辐射面）。安全提示：与 mission-control alpha 相同口径——本控制平面面向可信内网，公网暴露需自加 TLS 反代。
 
 ## 功能地图（对应需求报告）
 
@@ -34,6 +70,7 @@ python _serve.py        # 或 python -m http.server 8437
 | **任务中心** | 任务状态机（运行/排队/等待审批/已暂存/恢复中/结果待核对），详情抽屉含执行轨迹、检查点（模式/兼容性）、**批准续跑 / 检查点暂存 / 恢复 / 取消**等可操作语义 | FR-04 / FR-09、S04 / S12 |
 | **维护编排** | S06 全流程向导：影响分析 → 前置检查（**不可中断任务阻塞自动推进，可暂存解除或授权强推**）→ 准入限制 → 任务排空 → 执行维护（终端日志）→ 验证恢复；完成后**自动更换槽位、关闭告警**，服务器视图同步刷新 | FR-05、S06、T03 |
 | **治理配额** | 租户 Token / 沙箱并发 / 步骤上限配额条；**模型路由规则表（对标 agentgateway）**：匹配条件、流量分担权重编辑（恒等于 100 不变量）、Fallback 策略与优先级，合规专路不切换；**操作记录（opId 三段式：已受理→已执行→已验证）**；策略事件流（越权阻断/凭据撤销/熔断/结果核对）；工具契约 | FR-06 / FR-08 / FR-10、S13 / S14 / S16 |
+| **接入面 · Live**（真实数据） | 连接 `server/` 控制平面：Agent 实况（注册/心跳/能力声明五项徽标）、发起任务（平台创建 → Worker 认领）、任务实况（**批准续跑 / 检查点暂存 / 恢复 / 取消**，受 caps + 状态机双重门控，拒绝时透出 403/451/412 错误码）、opId 三段式操作记录、SSE 实时事件流；未运行服务端时给出启动指引，不影响模拟视图 | §4 / §5 / §9 全量落地 |
 
 ## 建议 5 分钟演示动线
 
@@ -44,21 +81,24 @@ python _serve.py        # 或 python -m http.server 8437
 5. **拓扑依赖** — 点「影响分析模式」后点击预警服务器，看红色辐射面与影响统计（服务器 → Agent Infra → 任务）
 6. **任务中心 / 治理配额** — 审批 `T26-0731` 续跑、看 `T26-0677` 的 S12 结果待核语义；治理页看路由规则与权重编辑、操作记录三段式推进，做一次 Fallback 演练
 7. **沙箱实例（资产目录）** — 看期望/实际双列与漂移，点「执行对账」看收敛；GC 扫描看受保护实例跳过；打开任一实例的 CRD YAML
+8. **接入面 · Live**（需启动服务端）— `node server/index.mjs` + `node worker/worker.mjs` 后：创建一个"需审批"任务，看 Worker 认领与进度推送；到 60% 挂起后在 UI 点「批准续跑」看续跑完成；对 ag-ops 的运行任务点「检查点暂存」看 **451 能力门控**；CLI 侧 `node cli.mjs impact srv-gpu-01` 对照拓扑视图的影响分析
 
 ## 技术说明
 
 ```
-index.html          外壳：启动序列 / 顶栏 / 侧栏导航 / 七个视图骨架（服务器管理为默认首屏，含五个子页）
+index.html          外壳：启动序列 / 顶栏 / 侧栏导航 / 八个视图骨架（服务器管理为默认首屏，含五个子页）
 assets/style.css    视觉系统：深空靛蓝控制台、四层语义色、HUD 细节
-assets/data.js      世界模型：四层对象 + 机房平面/机柜/网络设备/链路 + 依赖边 + 影响分析 + 服务器承载查询
+assets/data.js      模拟世界模型：四层对象 + 机房平面/机柜/网络设备/链路 + 依赖边 + 影响分析 + 服务器承载查询
 assets/core.js      核心引擎：路由 / 时钟 / 2s 模拟数据 tick（含传感器抖动）/ Toast / 模态 / 抽屉
 assets/graph.js     拓扑图：Canvas 布局与绘制、粒子流、命中检测、拖拽、影响分析
 assets/views.js     视图渲染：服务器（清单/平面/机柜）/ 总览 / 资产 / 任务 / 治理 + 手绘 Canvas 图表
 assets/net.js       物理网络拓扑：三层网络 + 机柜分组区 + 流量粒子 + 端口映射表
 assets/dc3d.js      数据中心 3D 等轴投影：机柜建模、拖拽旋转、缩放、点击选中
 assets/flow.js      维护编排向导状态机（完成后联动服务器槽位与告警）
+assets/live.js      接入面 Live 视图：连接真实控制平面（REST + SSE），状态机操作与错误码透出
 ```
 
-- 纯 vanilla JS，无任何外部依赖（无 CDN、无字体请求），离线可用
+- 前端纯 vanilla JS，无任何外部依赖（无 CDN、无字体请求），离线可用；控制平面同样零 npm 依赖（Node 22+ 内置 `node:sqlite` / `node:test`）
 - 图表全部 Canvas 手绘（吞吐面积图 / 租户配额柱状 / 延迟折线），拓扑图支持悬停高亮上下游
 - 尊重 `prefers-reduced-motion`；键盘 Esc 关闭抽屉/模态；窄屏自适应降级
+- MCP 接入示例：`claude mcp add axon -e AXON_URL=http://127.0.0.1:8437 -e AXON_API_KEY=axk_xxx -- node mcp/server.mjs`

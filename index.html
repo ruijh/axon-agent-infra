@@ -50,8 +50,9 @@
       <button class="rail-btn" data-view="tasks"><i class="ri"></i><span>任务中心</span></button>
       <button class="rail-btn" data-view="maint"><i class="ri"></i><span>维护编排</span></button>
       <button class="rail-btn" data-view="gov"><i class="ri"></i><span>治理配额</span></button>
+      <button class="rail-btn" data-view="live"><i class="ri"></i><span>接入面 · Live</span></button>
       <div class="rail-foot">
-        <div class="rail-version">v0.9.0-MVP</div>
+        <div class="rail-version">v0.95.0-MVP</div>
       </div>
     </nav>
 
@@ -282,6 +283,43 @@
         </div>
       </section>
 
+      <!-- ═══ 接入面 · Live（真实控制平面 · 对标 mission-control 的多接口交付）═══ -->
+      <section class="view" id="view-live">
+        <div class="view-head row">
+          <div>
+            <h1>接入面 · Live 控制平面</h1>
+            <p class="view-sub">REST + SSE + CLI + MCP + Worker 五接口同源 —— 与前七个视图的模拟世界共用一套 SPEC 语义（真实数据，需运行服务端）</p>
+          </div>
+          <div class="live-conn" id="live-conn"></div>
+        </div>
+        <div class="alert-strip" id="live-hint" hidden></div>
+        <div class="live-grid">
+          <div class="panel" id="live-agents-panel">
+            <div class="panel-head"><h2>Agent 实况</h2><span class="panel-note">注册 · 心跳 · 能力声明（§4）</span></div>
+            <table class="tbl"><thead><tr><th>Agent</th><th>状态</th><th>能力声明</th><th>心跳</th></tr></thead>
+              <tbody id="live-agents"></tbody></table>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h2>发起任务</h2><span class="panel-note">由平台/负责人创建，Agent 认领执行</span></div>
+            <div class="live-create" id="live-create"></div>
+          </div>
+          <div class="panel span-live-tasks">
+            <div class="panel-head"><h2>任务实况 · 状态机可操作</h2><span class="live-dot" id="live-task-dot" hidden></span></div>
+            <table class="tbl"><thead><tr>
+              <th>任务</th><th>Agent</th><th>状态</th><th class="w-progress">进度</th><th>操作（受 caps 与状态机双重门控）</th>
+            </tr></thead><tbody id="live-tasks"></tbody></table>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h2>操作记录 · opId 三段式</h2><span class="panel-note">SPEC §4.3</span></div>
+            <div class="evt-feed tall" id="live-ops"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h2>实时事件流 · SSE</h2><span class="live-dot" id="live-evt-dot" hidden></span></div>
+            <div class="evt-feed tall" id="live-events"></div>
+          </div>
+        </div>
+      </section>
+
     </main>
   </div>
 
@@ -315,5 +353,6 @@
 <script src="assets/net.js"></script>
 <script src="assets/dc3d.js"></script>
 <script src="assets/flow.js"></script>
+<script src="assets/live.js"></script>
 </body>
 </html>

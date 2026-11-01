@@ -4,11 +4,11 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | v0.9-DRAFT（P0 出口文档草案） |
+| 版本 | v0.95-DRAFT（P0 出口文档草案） |
 | 日期 | 2026-11-01 |
 | 状态 | 待评审 |
-| 上游输入 | 《面向 Agent 与 Agent 工作负载的系统管理软件需求调研报告》（下称"报告"）；AXON Demo（`E:\Agent Infra Pilot`，v0.9.0-MVP） |
-| 对标项目 | opensandbox-group/OpenSandbox · kubernetes-sigs/agent-sandbox · agentgateway/agentgateway · kagent-dev/kagent · e2b-dev/runtime |
+| 上游输入 | 《面向 Agent 与 Agent 工作负载的系统管理软件需求调研报告》（下称"报告"）；AXON Demo（`E:\Agent Infra Pilot`，v0.95.0-MVP） |
+| 对标项目 | opensandbox-group/OpenSandbox · kubernetes-sigs/agent-sandbox · agentgateway/agentgateway · kagent-dev/kagent · e2b-dev/runtime · builderz-labs/mission-control（控制平面交付形态参照） |
 | 关键词约定 | **必须**（MUST）/ **应**（SHOULD）/ **可以**（MAY），参照 RFC 2119 |
 
 ---
@@ -411,11 +411,29 @@ status:
 
 | 码 | 含义 |
 |---|---|
-| `409 SOURCE_CONFLICT` | 与外部系统配置来源冲突（双控制器写同一对象） |
+| `409 SOURCE_CONFLICT` | 与外部系统配置来源冲突（双控制器写同一对象）；亦用于幂等键请求体冲突 |
 | `451 CAPABILITY_NOT_DECLARED` | 对象未声明该能力 |
 | `409 STATE_TRANSITION_INVALID` | 非法状态迁移 |
-| `412 PRECONDITION_FAILED` | 前置检查未过（如不可中断任务未处置） |
+| `412 PRECONDITION_FAILED` | 前置检查未过（如不可中断任务未处置、强推未二次确认） |
 | `429 QUOTA_EXCEEDED` | 配额限制生效中 |
+
+### 9.5 交付面（v0.95 已实现）
+
+| 交付面 | 入口 | 说明 |
+|---|---|---|
+| REST | `node server/index.mjs` → `/api/v1/*` | 本规范 §9.1 全量资源面 + `Idempotency-Key` + §9.4 错误信封 |
+| OpenAPI | `GET /api/v1/openapi.json`、`/api/v1/docs` | OpenAPI 3.1 描述与内联文档页 |
+| SSE | `GET /api/v1/events/stream` | `event: policy / task / op`；EventSource 可用 `?key=` 携带凭据 |
+| CLI | `node cli.mjs <command>` | setup / keys / tasks / create-task / approve / impact / ops / events / maintenance |
+| MCP Server | `node mcp/server.mjs`（stdio JSON-RPC） | 8 工具：状态 / **影响分析** / 能力查询 / 队列 / 认领 / 回报 / 审批 / 策略事件 |
+| Worker 接入 | `node worker/worker.mjs` | pull 模型参照 mission-control：register（caps）→ heartbeat → queue → claim → 汇报 → 终态 |
+| UI | 侧栏「接入面 · Live」 | 真实数据视图：状态机操作、opId 三段式、SSE 事件流；错误码原样透出 |
+
+机器角色 `agent`（§9.3 之外新增）：仅允许心跳、认领、进度/终态回报、自注册——**任务创建仍归属平台/负责人角色**（与 mission-control 的任意 Key 建任务不同，AXON 保持治理边界）。
+
+### 9.6 不变量的可执行验证
+
+§4/§5/§7/§8 的硬约束以 `node --test tests/invariants.test.mjs` 固化（19 项）：451 能力门控且任务状态不被静默变更、非法迁移 409、不可中断任务取消与维护前置 412（含强推审计）、配额双阈值 429 + 策略事件、路由权重和恒等 100、幂等重放与冲突、影响分析分层统计、S05 GC 保护、对账收敛与 RECONCILE_DIFF 事件、opId 三段式全部推进到 verified。
 
 ---
 
@@ -448,10 +466,11 @@ status:
 | §7.3 维护准入四开关 | ✅ 已实现（维护向导 Step 3） |
 | §8.3 七段操作流程 | ✅ 已实现（维护向导七步） |
 | Agent 部署深度（§6.2 扩展） | ✅ 已实现（实例清单、期望/就绪、灰度流量控制 0/10/50/100、版本回退；对标 kagent） |
-| §9 API 服务层 | ❌ 未实现（纯前端模拟；OpenAPI 描述随 v1.0 输出） |
+| §9 API 服务层 | ✅ 已实现（v0.95：REST 全量 + OpenAPI 3.1 + SSE + CLI + MCP + Worker 接入闭环；`server/` 零 npm 依赖，node:sqlite WAL；不变量测试 19/19 通过，见 §9.5/§9.6） |
 
 ## 12. 版本与演进
 
-- v0.9（本文）：语义冻结，待评审；
-- v1.0（目标）：补 §2.9 实例模型 + §9 API OpenAPI 描述 + 权限矩阵细则；
-- v1.x：多集群、对账（S20）演练接口、成本归集口径（报告 FR-15）。
+- v0.9：语义冻结；
+- v0.95（本文）：§9 API 服务层落地（REST/OpenAPI/SSE/CLI/MCP/Worker + 六角色鉴权 + 幂等 + opId 三段式）+ 不变量测试固化 + UI「接入面 · Live」真实数据视图；对账语义细化：`desiredState=TERMINATED` 的收敛只能走 GC 路径（S05 保护检查），对账操作不得越过；
+- v1.0（目标）：权限矩阵细则（租户级隔离）+ TaskRun 期望/实际双列 + 全局对账视图；
+- v1.x：多集群、对账（S20）演练接口、成本归集口径（报告 FR-15）、Webhook 告警与定时任务模板、Docker 交付与安全加固文档。
