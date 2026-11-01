@@ -4,6 +4,8 @@
 
 TASK_META.cancelled = { txt: "已取消", cls: "dim" };
 
+const CV = window.AXON_CV;
+
 AXON.feed = [
   { ts: "10:28", tag: "检查点", cls: "info", msg: "<b>T26-0733</b> 写入检查点 cp-d90b · 双副本落盘确认" },
   { ts: "10:26", tag: "审批", cls: "warn", msg: "<b>T26-0731</b> 等待人工审批 47 分钟 · 环境已按检查点暂存" },
@@ -37,7 +39,7 @@ function drawThroughput() {
 
   ctx.clearRect(0, 0, w, h);
   ctx.font = "9.5px Consolas,monospace";
-  ctx.strokeStyle = "rgba(96,190,255,.09)"; ctx.fillStyle = "rgba(130,150,189,.6)";
+  ctx.strokeStyle = CV.rgba("steel", .09); ctx.fillStyle = CV.rgba("textDim", .6);
   for (let g = 0; g <= 4; g++) {
     const y = pad.t + ih * g / 4;
     ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
@@ -48,8 +50,8 @@ function drawThroughput() {
 
   /* 完成量：面积 + 发光折线 */
   const grad = ctx.createLinearGradient(0, pad.t, 0, h - pad.b);
-  grad.addColorStop(0, "rgba(55,226,255,.30)");
-  grad.addColorStop(1, "rgba(55,226,255,.02)");
+  grad.addColorStop(0, CV.rgba("accent", .30));
+  grad.addColorStop(1, CV.rgba("accent", .02));
   ctx.beginPath();
   data.forEach((d, i) => i ? ctx.lineTo(X(i), Y(d.done)) : ctx.moveTo(X(0), Y(d.done)));
   ctx.lineTo(X(data.length - 1), pad.t + ih); ctx.lineTo(X(0), pad.t + ih); ctx.closePath();
@@ -57,18 +59,18 @@ function drawThroughput() {
 
   ctx.beginPath();
   data.forEach((d, i) => i ? ctx.lineTo(X(i), Y(d.done)) : ctx.moveTo(X(0), Y(d.done)));
-  ctx.strokeStyle = "rgba(90,235,255,.95)"; ctx.lineWidth = 1.6;
-  ctx.shadowColor = "rgba(55,226,255,.55)"; ctx.shadowBlur = 8; ctx.stroke(); ctx.shadowBlur = 0;
+  ctx.strokeStyle = CV.rgba("accentSoft", .95); ctx.lineWidth = 1.6;
+  ctx.shadowColor = CV.rgba("accent", .55); ctx.shadowBlur = 8; ctx.stroke(); ctx.shadowBlur = 0;
 
   /* 失败：红色点 */
   data.forEach((d, i) => {
     if (!d.fail) return;
-    ctx.fillStyle = "rgba(255,77,109,.9)";
+    ctx.fillStyle = CV.rgba("crit", .9);
     ctx.beginPath(); ctx.arc(X(i), Y(d.done + d.fail), 2.2, 0, 7); ctx.fill();
   });
 
   $("#tp-legend").innerHTML =
-    '<span><i style="background:#5aeaff"></i>完成任务/h</span><span><i style="background:#ff4d6d"></i>失败/超时</span>';
+    `<span><i style="background:${CV.hex("accentSoft")}"></i>完成任务/h</span><span><i style="background:${CV.hex("crit")}"></i>失败/超时</span>`;
 }
 
 function drawTokenBars() {
@@ -85,10 +87,10 @@ function drawTokenBars() {
   ts.forEach((t, i) => {
     const x = pad.l + iw * (i + 0.5) / ts.length;
     const pct = t.tokenUsed / t.tokenBudget;
-    const col = pct > 0.85 ? "255,77,109" : pct > 0.7 ? "255,179,64" : "55,226,255";
+    const col = pct > 0.85 ? CV.tri("crit") : pct > 0.7 ? CV.tri("warn") : CV.tri("accent");
     /* 预算刻度 */
     const bh = t.tokenBudget / maxV * ih;
-    ctx.strokeStyle = "rgba(130,150,189,.35)"; ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = CV.rgba("textDim", .35); ctx.setLineDash([3, 3]);
     ctx.strokeRect(x - bw / 2, pad.t + ih - bh, bw, bh);
     ctx.setLineDash([]);
     /* 实际用量 */
@@ -100,7 +102,7 @@ function drawTokenBars() {
     ctx.font = "10px Consolas,monospace"; ctx.textAlign = "center";
     ctx.fillStyle = `rgba(${col},1)`;
     ctx.fillText(Math.round(pct * 100) + "%", x, pad.t + ih - uh - 5);
-    ctx.fillStyle = "rgba(130,150,189,.8)";
+    ctx.fillStyle = CV.rgba("textDim", .8);
     ctx.fillText(t.name, x, h - 8);
   });
 }
@@ -117,20 +119,20 @@ function drawLatency() {
   const Y = v => pad.t + ih * (1 - (v - min) / (max - min));
 
   ctx.clearRect(0, 0, w, h);
-  ctx.strokeStyle = "rgba(96,190,255,.09)";
-  ctx.font = "9.5px Consolas,monospace"; ctx.fillStyle = "rgba(130,150,189,.6)";
+  ctx.strokeStyle = CV.rgba("steel", .09);
+  ctx.font = "9.5px Consolas,monospace"; ctx.fillStyle = CV.rgba("textDim", .6);
   for (let v = 1; v <= 4; v++) {
     const y = Y(v);
     ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
     ctx.textAlign = "right"; ctx.fillText(v + "s", pad.l - 5, y + 3);
   }
   /* SLO 阈值 */
-  ctx.strokeStyle = "rgba(255,179,64,.5)"; ctx.setLineDash([5, 4]);
+  ctx.strokeStyle = CV.rgba("warn", .5); ctx.setLineDash([5, 4]);
   ctx.beginPath(); ctx.moveTo(pad.l, Y(2.5)); ctx.lineTo(w - pad.r, Y(2.5)); ctx.stroke();
   ctx.setLineDash([]);
 
   const grad = ctx.createLinearGradient(0, pad.t, 0, h - pad.b);
-  grad.addColorStop(0, "rgba(177,140,255,.25)"); grad.addColorStop(1, "rgba(177,140,255,.02)");
+  grad.addColorStop(0, CV.rgba("violet", .25)); grad.addColorStop(1, CV.rgba("violet", .02));
   ctx.beginPath();
   arr.forEach((v, i) => i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(0), Y(v)));
   ctx.lineTo(X(arr.length - 1), h - pad.b); ctx.lineTo(X(0), h - pad.b); ctx.closePath();
@@ -138,11 +140,11 @@ function drawLatency() {
 
   ctx.beginPath();
   arr.forEach((v, i) => i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(0), Y(v)));
-  ctx.strokeStyle = "rgba(196,166,255,.95)"; ctx.lineWidth = 1.5;
-  ctx.shadowColor = "rgba(177,140,255,.5)"; ctx.shadowBlur = 7; ctx.stroke(); ctx.shadowBlur = 0;
+  ctx.strokeStyle = CV.rgba("violet", .95); ctx.lineWidth = 1.5;
+  ctx.shadowColor = CV.rgba("violet", .5); ctx.shadowBlur = 7; ctx.stroke(); ctx.shadowBlur = 0;
 
   const lv = arr[arr.length - 1];
-  ctx.fillStyle = "#fff"; ctx.shadowColor = "#b18cff"; ctx.shadowBlur = 10;
+  ctx.fillStyle = CV.color("textBright"); ctx.shadowColor = CV.color("violet"); ctx.shadowBlur = 10;
   ctx.beginPath(); ctx.arc(X(arr.length - 1), Y(lv), 2.6, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
 }
 
@@ -373,23 +375,27 @@ function rackColumnHtml(rk) {
 /* ══ 平面布局（机房俯视图 + 机柜下钻）══════════════════ */
 function renderFloor() {
   const D = AXON_DATA, F = D.dcFloor;
-  const W = 1060, H = 450, RW = 100, RD = 66;
-  const rowY = { A: 96, B: 280 };
-  const xs = (i) => 128 + i * 128;
+  const W = 1440, H = 480, RW = 168, RD = 72;
+  const rowY = { A: 96, B: 290 };
+  const xs = (i) => 128 + i * 181;
   const managed = new Set(D.racks.map(r => r.id));
+  const totalRacks = F.rows.reduce((a, r) => a + r.racks.length, 0);
   const sel = AXON.floorRack && managed.has(AXON.floorRack) ? AXON.floorRack : "R04";
 
   const els = [];
+  /* 文字裁剪兜底：无论数据多长都不允许溢出机柜框 */
+  els.push(`<defs>${[...managed].map(rid =>
+    `<clipPath id="fpc-${rid}"><rect x="1" y="1" width="${RW - 2}" height="${RD - 2}" rx="4"/></clipPath>`).join("")}</defs>`);
   els.push(`<rect x="14" y="14" width="${W - 28}" height="${H - 28}" class="fp-room" rx="8"/>`);
-  [[30, 64], [30, 168], [30, 272], [W - 64, 160]].forEach(([cx, cy]) =>
+  [[26, 100], [26, 216], [26, 332], [1390, 190]].forEach(([cx, cy]) =>
     els.push(`<g class="fp-crac"><rect x="${cx}" y="${cy}" width="32" height="72" rx="3"/><text x="${cx + 16}" y="${cy + 40}">CRAC</text></g>`));
   els.push(`<g class="fp-door"><rect x="86" y="${H - 28}" width="64" height="10"/><text x="118" y="${H - 34}">入口</text></g>`);
-  els.push(`<g class="fp-aisle"><rect x="70" y="182" width="${W - 150}" height="76" rx="4"/><text x="${W / 2}" y="224">冷通道 · COLD AISLE（封闭）</text></g>`);
-  els.push(`<text class="fp-hot" x="${W / 2}" y="52">热通道 · HOT AISLE</text>`);
-  els.push(`<text class="fp-hot" x="${W / 2}" y="${H - 56}">热通道 · HOT AISLE</text>`);
+  els.push(`<g class="fp-aisle"><rect x="118" y="186" width="1174" height="86" rx="4"/><text x="${W / 2}" y="234">冷通道 · COLD AISLE（封闭）</text></g>`);
+  els.push(`<text class="fp-hot" x="${W / 2}" y="56">热通道 · HOT AISLE</text>`);
+  els.push(`<text class="fp-hot" x="${W / 2}" y="408">热通道 · HOT AISLE</text>`);
 
   F.rows.forEach(row => {
-    els.push(`<text class="fp-rowlabel" x="72" y="${rowY[row.id] + 40}">${esc(row.label)}</text>`);
+    els.push(`<text class="fp-rowlabel" transform="translate(88 ${rowY[row.id] + RD / 2}) rotate(-90)" text-anchor="middle">${esc(row.label)}</text>`);
     row.racks.forEach((rid, i) => {
       const x = xs(i), y = rowY[row.id];
       if (managed.has(rid)) {
@@ -397,19 +403,24 @@ function renderFloor() {
         const { devs, usedU, hasWarn } = rackStats(rid);
         const nSrv = devs.filter(m => m.kind === "server").length;
         const nNet = devs.length - nSrv;
+        const devList = devs.map(m => m.ref.name).join(" / ");
         els.push(`<g class="fp-rack managed ${rid === sel ? "sel" : ""}" data-rack="${rid}" transform="translate(${x},${y})">
+          <title>${rid} · ${esc(rk.note)}｜已用 ${usedU}U / ${RACK_UNITS}U｜${nSrv}×服务器 + ${nNet}×网络设备｜${esc(devList)}</title>
           <rect class="fp-rack-rect" width="${RW}" height="${RD}" rx="4"/>
-          <circle class="fp-led ${hasWarn ? "warn" : "ok"}" cx="14" cy="17" r="4"/>
-          <text class="fp-rack-name" x="26" y="21">${rid} · ${esc(rk.note)}</text>
-          <text class="fp-rack-sub" x="10" y="38">已用 ${usedU}U / 42U · ${nSrv}×服务器 + ${nNet}×网络设备</text>
-          <text class="fp-rack-sub2" x="10" y="54">${devs.slice(0, 2).map(m => esc(m.ref.name.replace(" · ", " "))).join(" · ")}${devs.length > 2 ? " …" : ""}</text>
+          <g clip-path="url(#fpc-${rid})">
+            <circle class="fp-led ${hasWarn ? "warn" : "ok"}" cx="14" cy="19" r="4.5"/>
+            <text class="fp-rack-name" x="26" y="24">${rid}</text>
+            <text class="fp-rack-unit" x="${RW - 10}" y="24" text-anchor="end">${usedU}U / ${RACK_UNITS}U</text>
+            <text class="fp-rack-note" x="10" y="43">${esc(rk.note)}</text>
+            <text class="fp-rack-sub" x="10" y="60">${nSrv}×服务器 + ${nNet}×网络设备</text>
+          </g>
           <line class="fp-front" x1="4" y1="${RD}" x2="${RW - 4}" y2="${RD}"/>
         </g>`);
       } else {
         els.push(`<g class="fp-rack unmanaged" data-rack="${rid}" transform="translate(${x},${y})">
           <rect class="fp-rack-rect" width="${RW}" height="${RD}" rx="4"/>
-          <text class="fp-rack-name" x="10" y="30">${rid}</text>
-          <text class="fp-rack-sub" x="10" y="48">未纳管</text>
+          <text class="fp-rack-name" x="${RW / 2}" y="40" text-anchor="middle">${rid}</text>
+          <text class="fp-rack-sub" x="${RW / 2}" y="56" text-anchor="middle">未纳管</text>
           <line class="fp-front" x1="4" y1="${RD}" x2="${RW - 4}" y2="${RD}"/>
         </g>`);
       }
@@ -418,7 +429,7 @@ function renderFloor() {
 
   $("#servers-floor-wrap").innerHTML = `
     <div class="panel">
-      <div class="dc-breadcrumb">华东-1 · A 栋 — <b>A2 机房</b>（22×12 m · 14 柜，纳管 3 柜）— 冷热通道封闭 · 精密空调 ×4 · 点击机柜查看 U 位</div>
+      <div class="dc-breadcrumb">华东-1 · A 栋 — <b>A2 机房</b>（22×12 m · ${totalRacks} 柜，纳管 ${managed.size} 柜）— 冷热通道封闭 · 精密空调 ×4 · 悬停机柜看清单 · 点击机柜查看 U 位</div>
       <div class="fp-layout">
         <svg viewBox="0 0 ${W} ${H}" class="fp-svg" id="fp-svg">${els.join("")}</svg>
         <aside class="fp-detail" id="fp-detail"></aside>
@@ -640,6 +651,12 @@ AXON.on("server-detail", (id) => openServerDrawer(id));
 /* ══ 资产目录 ═════════════════════════════════════════════ */
 const KIND_LABEL = { runtime: "运行时", sandbox: "沙箱", gateway: "网关", state: "状态服务", identity: "身份" };
 const KIND_COLOR = { runtime: "#37e2ff", sandbox: "#2ef0a8", gateway: "#6f9bff", state: "#b18cff", identity: "#ffb340" };
+function syncKindColor() {
+  KIND_COLOR.runtime = CV.hex("l1"); KIND_COLOR.sandbox = CV.hex("ok"); KIND_COLOR.gateway = CV.hex("l0");
+  KIND_COLOR.state = CV.hex("violet"); KIND_COLOR.identity = CV.hex("warn");
+}
+syncKindColor();
+AXON.on("theme", syncKindColor);
 
 /* ══ 沙箱实例管理（对标 OpenSandbox · SPEC §2.9/§6.1）══════ */
 const SBX_STATE_CLS = { WARM: "dim", BOUND: "ok", PAUSED: "info", "GC-PENDING": "warn", TERMINATED: "dim" };

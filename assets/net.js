@@ -8,13 +8,15 @@
   const canvas = $("#net-canvas");
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
+  const CV = window.AXON_CV;
 
-  const TYPE_COLOR = {
-    "业务": [55, 226, 255],
-    "上行": [111, 155, 255],
-    "带外": [177, 140, 255],
-  };
-  const NODE_COLOR = { server: "#6f9bff", core: "#ff9350", tor: "#ff9350", bmc: "#b18cff" };
+  /* 主题调色板包装：切换主题后下一次 draw 即生效 */
+  const TYPE_COLOR = () => ({
+    "业务": CV.tri("accent"),
+    "上行": CV.tri("steel"),
+    "带外": CV.tri("violet"),
+  });
+  const NODE_COLOR = () => ({ server: CV.hex("l0"), core: CV.hex("l2"), tor: CV.hex("l2"), bmc: CV.hex("violet") });
   const GLYPH = { server: "▤", core: "◈", tor: "⇄", bmc: "◍" };
 
   const nodes = [], nodeMap = new Map(), links = AXON_DATA.netLinks;
@@ -34,14 +36,14 @@
   const ROW_Y = [52, 138, 232, 306];
   const RACK_TOR = { R02: "sw-tor-kbb", R03: "sw-tor-kbd", R04: "sw-tor-gpu", R05: "sw-tor-svc", R06: "sw-tor-aud" };
   const RACK_LABEL = { R02: "R02 · 业务知识库", R03: "R03 · 研发知识库", R04: "R04 · GPU 柜", R05: "R05 · 通用 / 存储", R06: "R06 · 审计存证" };
-  const ZONE_COLORS = ["61,226,255", "61,226,255", "111,155,255", "177,140,255", "255,179,64"];
+  const ZONE_COLORS = () => [CV.tri("l1"), CV.tri("l1"), CV.tri("l0"), CV.tri("violet"), CV.tri("warn")];
   let zones = [];
 
   function layout() {
     const rackIds = Object.keys(RACK_TOR);
     const L = 26, R = W - 150;
     const bandW = Math.max(120, (R - L) / rackIds.length);
-    zones = [{ label: "R01 · 网络柜（核心）", x0: 0.24, x1: 0.76, y0: 16, y1: 84, color: "255,147,80" }];
+    zones = [{ label: "R01 · 网络柜（核心）", x0: 0.24, x1: 0.76, y0: 16, y1: 84, color: CV.tri("l2") }];
     rackIds.forEach((rid, i) => {
       const x0 = L + bandW * i, x1 = L + bandW * (i + 1);
       const tor = nodeMap.get(RACK_TOR[rid]);
@@ -55,7 +57,7 @@
         n.x = cols === 1 ? (x0 + x1) / 2 : x0 + bandW * (col + 0.5) / cols;
         n.y = ROW_Y[2] + row * (ROW_Y[3] - ROW_Y[2]);
       });
-      zones.push({ label: RACK_LABEL[rid], x0: (x0 - 6) / W, x1: (x1 + 6) / W, y0: 106, y1: 350, color: ZONE_COLORS[i] });
+      zones.push({ label: RACK_LABEL[rid], x0: (x0 - 6) / W, x1: (x1 + 6) / W, y0: 106, y1: 350, color: ZONE_COLORS()[i] });
     });
     ["sw-core-01", "sw-core-02"].forEach((id, i) => {
       const n = nodeMap.get(id);
@@ -152,13 +154,14 @@
     const focus = hoverId || selId;
     const rel = focus ? related(focus) : null;
     ctx.clearRect(0, 0, W, H);
+    const TC = TYPE_COLOR(), NC = NODE_COLOR();
     drawZones();
 
     /* 分层标题 */
     ctx.font = "10px Consolas,monospace";
     ctx.textAlign = "left";
     [["L0 · 核心层 Spine", ROW_Y[0]], ["L1 · 接入层 Leaf / 带外", ROW_Y[1]], ["L2 · 服务器（按机柜分组）", ROW_Y[2]]].forEach(([t, y]) => {
-      ctx.fillStyle = "rgba(130,150,189,.55)";
+      ctx.fillStyle = CV.rgba("textDim", .55);
       ctx.fillText(t, 14, y - 32);
     });
 
@@ -167,7 +170,7 @@
       const a = nodeMap.get(l.from), b = nodeMap.get(l.to);
       if (!a || !b) return;
       const lit = !rel || (rel.has(l.from) && rel.has(l.to));
-      const col = TYPE_COLOR[l.type] || [120, 160, 220];
+      const col = TC[l.type] || CV.tri("textDim");
       ctx.strokeStyle = `rgba(${col},${lit ? 0.62 : 0.06})`;
       ctx.lineWidth = l.w;
       ctx.beginPath();
@@ -192,7 +195,7 @@
       p.t += p.v;
       const t = p.dir === 1 ? p.t : 1 - p.t;
       const pt = lerp(a, b, Math.max(0, Math.min(1, t)));
-      const col = TYPE_COLOR[p.l.type] || [140, 230, 255];
+      const col = TC[p.l.type] || CV.tri("accentSoft");
       ctx.fillStyle = p.dim ? `rgba(${col},.25)` : `rgba(${col},.95)`;
       ctx.shadowColor = `rgba(${col},.8)`; ctx.shadowBlur = 5;
       ctx.beginPath();
@@ -204,9 +207,9 @@
     /* 节点 */
     nodes.forEach(n => {
       const lit = !rel || rel.has(n.id);
-      const col = NODE_COLOR[n.kind] || "#8aa";
+      const col = NC[n.kind] || CV.hex("textFaint");
       ctx.globalAlpha = lit ? 1 : 0.18;
-      ctx.fillStyle = "rgba(9,17,35,.94)";
+      ctx.fillStyle = CV.rgba("node", .94);
       ctx.strokeStyle = (n.id === hoverId || n.id === selId) ? col : col + "cc";
       ctx.lineWidth = (n.id === hoverId || n.id === selId) ? 1.8 : 1.1;
       if (n.id === hoverId || n.id === selId) { ctx.shadowColor = col; ctx.shadowBlur = 12; }
@@ -219,8 +222,8 @@
       ctx.fillRect(n.x - n.w / 2, n.y - n.h / 2, n.w, 2.4);
 
       if (n.ref.state === "warn") {
-        ctx.fillStyle = "#ffb340";
-        ctx.shadowColor = "#ffb340"; ctx.shadowBlur = 7;
+        ctx.fillStyle = CV.color("warn");
+        ctx.shadowColor = CV.color("warn"); ctx.shadowBlur = 7;
         ctx.beginPath();
         ctx.arc(n.x + n.w / 2 - 8, n.y - n.h / 2 + 8, 3, 0, Math.PI * 2);
         ctx.fill();
@@ -228,11 +231,11 @@
       }
 
       ctx.textAlign = "left";
-      ctx.fillStyle = "rgba(216,231,255,.96)";
+      ctx.fillStyle = CV.rgba("textBright", .96);
       ctx.font = '10.5px Consolas,"Segoe UI",monospace';
       const label = n.kind === "server" ? n.ref.id.replace("srv-", "") : n.ref.short;
       ctx.fillText((GLYPH[n.kind] || "◈") + " " + label, n.x - n.w / 2 + 8, n.y - 2);
-      ctx.fillStyle = "rgba(130,150,189,.85)";
+      ctx.fillStyle = CV.rgba("textDim", .85);
       ctx.font = "9px Consolas,monospace";
       const sub = n.kind === "server"
         ? `${n.ref.location.rack} U${n.ref.location.u[0]}` + (n.ref.location.u[1] > n.ref.location.u[0] ? `–${n.ref.location.u[1]}` : "")
@@ -272,9 +275,9 @@
 
   /* 图例 */
   $("#net-legend").innerHTML =
-    `<span><i style="border-color:rgb(55,226,255)"></i>业务链路</span>` +
-    `<span><i style="border-color:rgb(111,155,255)"></i>上行 / ECMP</span>` +
-    `<span><i style="border-color:rgb(177,140,255)"></i>带外管理</span>` +
+    `<span><i style="border-color:var(--cyan)"></i>业务链路</span>` +
+    `<span><i style="border-color:var(--l-server)"></i>上行 / ECMP</span>` +
+    `<span><i style="border-color:var(--violet)"></i>带外管理</span>` +
     `<span style="color:var(--cyan)">● 粒子 = 实时流量</span>`;
 
   /* 生命周期：子页激活时布局 + 渲染 */

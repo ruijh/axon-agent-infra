@@ -1,27 +1,43 @@
 /* ═══════════════════════════════════════════════════════════
    AXON · 数据中心 3D 视图（服务器管理 · 子页）
-   Canvas 等轴投影：房间地面 / 机柜立体建模 / 设备 U 位
-   交互：拖拽旋转 yaw · 滚轮缩放 · 点击机柜查看详情
+   管线：Blender 无头建模（tools/build_dc_model.py）
+         → glTF（assets/models/dc-a2.glb）
+         → three.js WebGL 实时渲染（本文件）
+   特性：PBR 材质 / 阴影 / Bloom / U 位设备状态映射 / 拾取交互
+   交互：拖拽环绕 · 滚轮缩放 · 点击机柜或设备查看详情
    ═══════════════════════════════════════════════════════════ */
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 
 (function () {
   const canvas = $("#dc3d-canvas");
   if (!canvas) return;
-  const ctx = canvas.getContext("2d");
 
   const D = AXON_DATA;
   const F = D.dcFloor;
-  const SC0 = 26;                 // 基准比例 px/m
-  const RACK = { w: 0.62, d: 1.16, h: 2.0 };
-  const CRAC = { w: 0.8, d: 0.8, h: 2.2 };
 
-  let W = 0, H = 0;
-  let yaw = -0.72, zoom = 1, auto = true;
-  let selId = null, hoverId = null;
-  let mouse = { x: -1, y: -1 }, drag = null, dragMoved = false;
-  const t0 = performance.now();
+  /* 设备种类 → 运行时发光色（面板 + LED）· 随主题调色板 */
+  const CV = window.AXON_CV;
+  const kindGlow = () => ({ server: CV.num("l0"), net: CV.num("l2"), bmc: CV.num("violet"), warn: CV.num("warn") });
 
-  /* 机柜实体：dcFloor 布局 + racks 纳管状态 */
+  /* 机柜实体：dcFloor 布局 + racks 纳管状态（与旧版数据口径一致） */
+  function rackStats(rid) {
+    const members = [
+      ...D.servers.map(s => ({ kind: "server", ref: s })),
+      ...D.netDevices.map(n => ({ kind: n.kind === "bmc" ? "bmc" : "net", ref: n })),
+    ];
+    const devs = members.filter(m => m.ref.location.rack === rid);
+    return {
+      devs,
+      usedU: devs.reduce((a, m) => a + (m.ref.location.u[1] - m.ref.location.u[0] + 1), 0),
+      hasWarn: devs.some(m => m.ref.state === "warn"),
+    };
+  }
   const racks = [];
   F.rows.forEach(row => {
     row.racks.forEach((rid, i) => {
@@ -35,269 +51,278 @@
     });
   });
 
-  function rackStats(rid) {
-    const members = [
-      ...AXON_DATA.servers.map(s => ({ kind: "server", ref: s })),
-      ...AXON_DATA.netDevices.map(n => ({ kind: "net", ref: n })),
-    ];
-    const devs = members.filter(m => m.ref.location.rack === rid);
-    return {
-      devs,
-      usedU: devs.reduce((a, m) => a + (m.ref.location.u[1] - m.ref.location.u[0] + 1), 0),
-      hasWarn: devs.some(m => m.ref.state === "warn"),
-    };
+  const hud = $("#dc3d-hud");
+
+  /* ── 渲染器 / 场景 ───────────────────────────────────── */
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+  } catch (e) {
+    hud.innerHTML = `<div class="h-title">3D 视图不可用</div><div class="h-kv">当前环境不支持 WebGL2</div>`;
+    return;
+  }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.25;
+
+  const scene = new THREE.Scene();
+  const sceneColor = () => CV.num("dcBg");
+  scene.background = new THREE.Color(sceneColor());
+  scene.fog = new THREE.Fog(sceneColor(), 24, 50);
+
+  const camera = new THREE.PerspectiveCamera(46, 2, 0.1, 120);
+  camera.position.set(9.5, 8.2, -12.8);   /* 从 -z 侧看：A 排（纳管 R01-R06）前门正对镜头 */
+
+  const controls = new OrbitControls(camera, canvas);
+  controls.target.set(0, 0.9, 0);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.07;
+  controls.minDistance = 3.5;
+  controls.maxDistance = 30;
+  controls.minPolarAngle = 0.12;
+  controls.maxPolarAngle = 1.42;
+  controls.autoRotate = !REDUCED;
+  controls.autoRotateSpeed = 0.65;
+  controls.addEventListener("start", () => { controls.autoRotate = false; });
+
+  /* 灯光：半球环境 + 主光（带阴影）+ 主题色轮廓光 + 冷通道点光 */
+  const hemi = new THREE.HemisphereLight(0x9fc3ff, 0x0a1226, 0.8);
+  scene.add(hemi);
+  const key = new THREE.DirectionalLight(0xdfeaff, 2.6);
+  key.position.set(10, 16, -9);
+  key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048);
+  key.shadow.camera.left = -15; key.shadow.camera.right = 15;
+  key.shadow.camera.top = 15; key.shadow.camera.bottom = -15;
+  key.shadow.camera.near = 1; key.shadow.camera.far = 50;
+  key.shadow.bias = -0.0003;
+  key.shadow.normalBias = 0.02;
+  scene.add(key);
+  const rim = new THREE.DirectionalLight(CV.num("accent"), 1.2);
+  rim.position.set(-14, 7, 9);
+  scene.add(rim);
+  const ptLights = [];
+  for (const px of [-4.5, 4.5]) {
+    const p = new THREE.PointLight(CV.num("accentSoft"), 36, 10, 2);
+    p.position.set(px, 2.7, 0);
+    scene.add(p);
+    ptLights.push(p);
   }
 
-  function resize() {
-    const r = canvas.parentElement.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    W = r.width; H = r.height;
-    canvas.width = W * dpr; canvas.height = H * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  /* 后期：Bloom（LED / 灯带辉光）+ 输出色调映射 */
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(new THREE.Vector2(2, 2), 0.55, 0.55, 0.72);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+
+  /* ── 模型加载与数据映射 ─────────────────────────────── */
+  const rackGroups = new Map();      // rid → Object3D（RACK_* 空物体）
+  const pickables = [];              // 可拾取网格（机柜全部件）
+  const devMeshes = new Map();       // 设备id → { body:[], led:[] }
+  const rackBodyMats = new Map();    // rid → [{ mat }]（悬停高亮用）
+  const devGlow = [];                // [{ mats, warn, color }]
+  let ready = false;
+
+  const selRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.86, 0.012, 10, 56),
+    new THREE.MeshBasicMaterial({ color: CV.num("accent"), transparent: true, opacity: 0.9 }),
+  );
+  selRing.rotation.x = -Math.PI / 2;
+  selRing.visible = false;
+  scene.add(selRing);
+
+  function labelSprite(text, color, alpha) {
+    const c = document.createElement("canvas");
+    c.width = 256; c.height = 64;
+    const g = c.getContext("2d");
+    g.font = "bold 30px Consolas,'Courier New',monospace";
+    g.textAlign = "center"; g.textBaseline = "middle";
+    g.shadowColor = "rgba(0,0,0,.85)"; g.shadowBlur = 6;
+    g.fillStyle = color;
+    g.fillText(text, 128, 34);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: tex, transparent: true, opacity: alpha, depthWrite: false,
+    }));
+    sp.scale.set(1.05, 0.26, 1);
+    return sp;
   }
 
-  /* 等轴投影：世界坐标（米，房间中心为原点）→ 屏幕 */
-  function project(x, y, z) {
-    const s = SC0 * zoom;
-    const cx = F.size.w / 2, cy = F.size.d / 2;
-    const px = x - cx, py = y - cy;
-    const c = Math.cos(yaw), sn = Math.sin(yaw);
-    const xr = px * c - py * sn, yr = px * sn + py * c;
-    return {
-      x: W / 2 + (xr - yr) * 0.866 * s,
-      y: H / 2 + 34 + ((xr + yr) * 0.5 - z) * s,
-      d: xr + yr,
-    };
-  }
-
-  const quad = (a, b, c, d2, fill, stroke) => {
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d2.x, d2.y);
-    ctx.closePath();
-    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
-    if (stroke) { ctx.strokeStyle = stroke; ctx.stroke(); }
-  };
-
-  const shade = (rgb, k) => `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${k})`;
-
-  /* 立方体：绘制顶面 + 两个朝向观察者的侧面 */
-  function drawBox(x, y, w, d, h, rgb, opts = {}) {
-    const p = (dx, dy, dz) => project(x + dx, y + dy, dz);
-    const cs = [
-      p(0, 0, 0), p(w, 0, 0), p(w, d, 0), p(0, d, 0),           // 底面四角
-      p(0, 0, h), p(w, 0, h), p(w, d, h), p(0, d, h),           // 顶面四角
-    ];
-    /* 找深度最大的底角（最靠观察者），其相邻两侧面可见 */
-    let fi = 0;
-    for (let i = 1; i < 4; i++) if (cs[i].d > cs[fi].d) fi = i;
-    const adj = [(fi + 3) % 4, (fi + 1) % 4];
-
-    /* 侧面（暗 → 亮），先画远的相邻面 */
-    const order = adj.slice().sort((a, b) => cs[a].d - cs[b].d);
-    order.forEach((idx, k) => {
-      const n = (idx + 1) % 4;
-      quad(cs[idx], cs[n], cs[n + 4], cs[idx + 4],
-        shade(rgb, k === 0 ? 0.32 : 0.5),
-        shade(rgb, 0.85));
+  function onModel(root) {
+    /* 轴向说明：Blender Z-up → glTF/three Y-up（three.z = -blender.y） */
+    root.traverse(o => {
+      if (!o.isMesh) return;
+      const n = o.name;
+      if (n.startsWith("DOOR_") || n.startsWith("LED_") || n.startsWith("ENV_Contain") || n.startsWith("ENV_Strip") || n.startsWith("ENV_ColdFloor") || n.startsWith("CRAC_")) {
+        o.castShadow = false;                       // 玻璃/发光件不投影，避免遮挡
+      } else {
+        o.castShadow = true;
+      }
+      o.receiveShadow = true;
     });
-    /* 顶面（最亮） */
-    quad(cs[4], cs[5], cs[6], cs[7],
-      shade(rgb, 0.66), shade(rgb, 0.95));
 
-    return { cs, fi, adj };
-  }
+    /* 机柜分组：RACK_<rid> 空物体 */
+    root.traverse(o => {
+      const m = /^RACK_(.+)$/.exec(o.name);
+      if (m) rackGroups.set(m[1], o);
+    });
 
-  /* 正面设备块：贴在最前侧面上的仿射小矩形 */
-  function drawDevices(rack, face) {
-    const { cs, fi } = face;
-    const i0 = fi, i1 = (fi + 1) % 4;
-    const p0 = cs[i0], p1 = cs[i1];         // 底边两端
-    const p2 = cs[i1 + 4], p3 = cs[i0 + 4]; // 顶边两端
-    rack.devList.forEach(m => {
-      const [u0, u1] = m.ref.location.u;
-      const t0v = 1 - u1 / 42, t1v = 1 - u0 / 42;   // 底=U1 → t=0 在底
-      const sPad = 0.14, s0 = sPad, s1 = 1 - sPad;
-      const pt = (s, t) => ({
-        x: (p0.x + (p1.x - p0.x) * s) * (1 - t) + (p3.x + (p2.x - p3.x) * s) * t,
-        y: (p0.y + (p1.y - p0.y) * s) * (1 - t) + (p3.y + (p2.y - p3.y) * s) * t,
+    racks.forEach(rk => {
+      const g = rackGroups.get(rk.id);
+      if (!g) return;
+      g.updateWorldMatrix(true, false);
+      const wp = new THREE.Vector3();
+      g.getWorldPosition(wp);
+
+      /* 每柜克隆材质（悬停高亮互不影响）+ 收集拾取件 */
+      const bodyMats = [];
+      g.traverse(o => {
+        if (!o.isMesh) return;
+        o.material = o.material.clone();
+        if (o.name.startsWith("BODY_")) {
+          o.material.emissive = new THREE.Color(CV.num("accent"));
+          o.material.emissiveIntensity = 0;
+          bodyMats.push({ mat: o.material });
+        }
+        pickables.push(o);
       });
-      const col = m.kind === "server" ? [111, 155, 255] : (m.ref.kind === "bmc" ? [177, 140, 255] : [255, 147, 80]);
-      const a = pt(s0, t0v), b = pt(s1, t0v), c = pt(s1, t1v), d2 = pt(s0, t1v);
-      quad(a, b, c, d2, shade(col, 0.72), shade(col, 0.95));
-      if (m.ref.state === "warn") {
-        const mid = pt((s0 + s1) / 2, (t0v + t1v) / 2);
-        const pulse = 0.5 + 0.5 * Math.sin((performance.now() - t0) / 300);
-        ctx.fillStyle = `rgba(255,179,64,${0.5 + 0.5 * pulse})`;
-        ctx.shadowColor = "#ffb340"; ctx.shadowBlur = 8;
-        ctx.beginPath(); ctx.arc(mid.x, mid.y, 2.6, 0, Math.PI * 2); ctx.fill();
-        ctx.shadowBlur = 0;
-      }
-    });
-  }
+      rackBodyMats.set(rk.id, bodyMats);
 
-  function bboxOf(rack) {
-    const pts = [
-      project(rack.x - RACK.w / 2, rack.y - RACK.d / 2, 0),
-      project(rack.x + RACK.w / 2, rack.y + RACK.d / 2, 0),
-      project(rack.x, rack.y, RACK.h + 0.5),
-    ];
-    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
-    return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
-  }
+      /* 机柜号标签（主题切换时按调色板重建） */
+      const lb = labelSprite(rk.id, CV.hex("textBright"), rk.managed ? 0.95 : 0.5);
+      lb.position.copy(wp).add(new THREE.Vector3(0, 2.42, 0));
+      scene.add(lb);
+      rackLabels.push({ sp: lb, id: rk.id, managed: rk.managed });
 
-  function draw() {
-    ctx.clearRect(0, 0, W, H);
-    const S = F.size;
-    const pulse = 0.5 + 0.5 * Math.sin((performance.now() - t0) / 900);
-
-    /* 地面 + 网格 */
-    const f = [
-      project(0, 0, 0), project(S.w, 0, 0), project(S.w, S.d, 0), project(0, S.d, 0),
-    ];
-    quad(f[0], f[1], f[2], f[3], "rgba(16,30,60,.72)", "rgba(96,190,255,.4)");
-    ctx.lineWidth = 1;
-    for (let gx = 1; gx < S.w; gx++) {
-      const a = project(gx, 0, 0), b = project(gx, S.d, 0);
-      ctx.strokeStyle = "rgba(78,150,255,.10)";
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-    }
-    for (let gy = 1; gy < S.d; gy++) {
-      const a = project(0, gy, 0), b = project(S.w, gy, 0);
-      ctx.strokeStyle = "rgba(78,150,255,.10)";
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-    }
-
-    /* 冷通道提示带（A/B 排之间） */
-    const ca = [
-      project(1.2, 4.4, 0), project(S.w - 1.2, 4.4, 0), project(S.w - 1.2, 7.6, 0), project(1.2, 7.6, 0),
-    ];
-    quad(ca[0], ca[1], ca[2], ca[3], "rgba(55,226,255,.06)", "rgba(55,226,255,.22)");
-    const caMid = project(S.w / 2, 6.0, 0);
-    ctx.fillStyle = "rgba(120,220,255,.5)";
-    ctx.font = '10px "Segoe UI","Microsoft YaHei"';
-    ctx.textAlign = "center";
-    ctx.fillText("冷通道 · COLD AISLE", caMid.x, caMid.y + 4);
-
-    /* CRAC 空调 */
-    F.crac.forEach(c => drawBox(c.x - CRAC.w / 2, c.y - CRAC.d / 2, CRAC.w, CRAC.d, CRAC.h, [70, 120, 180]));
-
-    /* 机柜：远 → 近 */
-    const sorted = racks.slice().sort((a, b) => {
-      const da = project(a.x, a.y, 0).d, db = project(b.x, b.y, 0).d;
-      return da - db;
-    });
-    sorted.forEach(rk => {
-      const isSel = rk.id === selId, isHover = rk.id === hoverId;
-      const rgb = rk.managed ? [70, 130, 235] : [38, 52, 82];
-      const x0 = rk.x - RACK.w / 2, y0 = rk.y - RACK.d / 2;
-      const face = drawBox(x0, y0, RACK.w, RACK.d, RACK.h, rgb);
-      if (rk.managed) drawDevices(rk, face);
-
-      /* 标签（顶面上方） */
-      const top = project(rk.x, rk.y, RACK.h + 0.42);
-      ctx.textAlign = "center";
-      ctx.font = (isSel || isHover ? "bold " : "") + '10px Consolas,monospace';
-      ctx.fillStyle = rk.managed ? (isSel || isHover ? "#c8f4ff" : "rgba(150,200,255,.85)") : "rgba(110,125,160,.5)";
-      ctx.fillText(rk.id, top.x, top.y);
-
-      /* 选中/预警效果 */
-      if (isSel) {
-        const bb = bboxOf(rk);
-        ctx.strokeStyle = `rgba(55,226,255,${0.55 + 0.4 * pulse})`;
-        ctx.lineWidth = 1.6;
-        ctx.setLineDash([5, 4]);
-        ctx.strokeRect(bb.x0 - 5, bb.y0 - 5, bb.x1 - bb.x0 + 10, bb.y1 - bb.y0 + 10);
-        ctx.setLineDash([]);
-      }
+      /* 预警机柜：顶部琥珀脉冲点 */
       if (rk.hasWarn) {
-        const w = project(rk.x, rk.y, RACK.h + 0.1);
-        ctx.fillStyle = `rgba(255,179,64,${0.4 + 0.5 * pulse})`;
-        ctx.shadowColor = "#ffb340"; ctx.shadowBlur = 9;
-        ctx.beginPath(); ctx.arc(w.x, w.y, 3.2, 0, Math.PI * 2); ctx.fill();
-        ctx.shadowBlur = 0;
+        const c = document.createElement("canvas");
+        c.width = c.height = 64;
+        const g2 = c.getContext("2d");
+        const grad = g2.createRadialGradient(32, 32, 2, 32, 32, 30);
+        grad.addColorStop(0, "rgba(255,196,90,1)");
+        grad.addColorStop(0.4, "rgba(255,160,50,.55)");
+        grad.addColorStop(1, "rgba(255,160,50,0)");
+        g2.fillStyle = grad; g2.fillRect(0, 0, 64, 64);
+        const tex = new THREE.CanvasTexture(c);
+        const dot = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+        dot.scale.set(0.5, 0.5, 1);
+        dot.position.copy(wp).add(new THREE.Vector3(0, 2.14, 0));
+        dot.userData.pulse = true;
+        scene.add(dot);
+        warnDots.push(dot);
       }
     });
 
-    /* 房间标注 */
-    const rm = project(S.w / 2, -0.55, 0);
-    ctx.fillStyle = "rgba(130,150,189,.6)";
-    ctx.font = '10px Consolas,monospace';
-    ctx.textAlign = "center";
-    ctx.fillText("华东-1 · A 栋 — A2 机房 · 22×12 m · 14 柜（纳管 3）", rm.x, rm.y);
+    /* 设备发光映射：DEV_<id> 面板 / LED_<id> 灯条 → 运行时状态色 */
+    devByIdLive.clear();
+    [...D.servers.map(s => ({ id: s.id, kind: "server", state: s.state })),
+     ...D.netDevices.map(n => ({ id: n.id, kind: n.kind === "bmc" ? "bmc" : "net", state: n.state }))]
+      .forEach(dv => devByIdLive.set(dv.id, dv));
+    devMeshes.clear();
+    root.traverse(o => {
+      if (!o.isMesh) return;
+      let m = /^(DEV_.+?)_bez$/.exec(o.name);
+      const isBez = !!m;
+      if (!m) m = /^(DEV_.+)$/.exec(o.name);
+      if (m) {
+        const id = m[1].slice(4);
+        const rec = devMeshes.get(id) || { body: [], led: [] };
+        rec.body.push(o);
+        devMeshes.set(id, rec);
+        o.userData.devId = id;
+        return;
+      }
+      m = /^LED_(.+)$/.exec(o.name);
+      if (m) {
+        const id = m[1];
+        const rec = devMeshes.get(id) || { body: [], led: [] };
+        rec.led.push(o);
+        devMeshes.set(id, rec);
+        o.userData.devId = id;
+      }
+    });
+    scene.add(root);
+    ready = true;
+    applyDevGlow();
+    renderHud();
   }
 
-  function loop() {
-    if (auto && !drag) yaw += 0.0026;
-    if (AXON.view === "servers" && AXON.serversTab === "3d") {
-      if (!W) resize();
-      draw();
-    }
-    requestAnimationFrame(loop);
+  /* 设备发光按当前主题上色（模型加载后 / 主题切换后调用） */
+  function applyDevGlow() {
+    const G = kindGlow();
+    devMeshes.forEach((rec, id) => {
+      const dv = devByIdLive.get(id);
+      if (!dv) return;
+      const warn = dv.state === "warn";
+      const color = warn ? G.warn : G[dv.kind];
+      const mats = [];
+      rec.body.forEach(o => {
+        if (!o.material.emissive) return;
+        o.material.emissive.set(color);
+        o.material.emissiveIntensity = warn ? 0.5 : 0.55;
+        mats.push({ mat: o.material, base: warn ? 0.5 : 0.55 });
+      });
+      rec.led.forEach(o => {
+        o.material.emissive.set(warn ? CV.num("warn") : CV.num("accentSoft"));
+        o.material.emissiveIntensity = warn ? 2.2 : 3.2;
+        mats.push({ mat: o.material, base: warn ? 2.2 : 3.2 });
+      });
+      if (warn && !devGlow.some(g => g.mats === mats)) devGlow.push({ mats, warn: true });
+    });
   }
 
-  /* ── 交互 ── */
-  function rackAt(x, y) {
-    const sorted = racks.slice().sort((a, b) => project(b.x, b.y, 0).d - project(a.x, a.y, 0).d);
-    for (const rk of sorted) {
-      const bb = bboxOf(rk);
-      if (x >= bb.x0 - 4 && x <= bb.x1 + 4 && y >= bb.y0 - 4 && y <= bb.y1 + 4) return rk;
-    }
-    return null;
-  }
+  const warnDots = [];
+  const rackLabels = [];
+  const devByIdLive = new Map();
+  const loader = new GLTFLoader();
+  loader.load(
+    "assets/models/dc-a2.glb",
+    (gltf) => {
+      try {
+        onModel(gltf.scene);
+      } catch (e) {
+        console.error("[dc3d] 模型处理失败", e);
+        hud.innerHTML = `<div class="h-title">模型处理失败</div>
+          <div class="h-kv" style="white-space:pre-wrap">${esc(String(e && e.message || e))}</div>`;
+      }
+    },
+    undefined,
+    () => {
+      hud.innerHTML = `<div class="h-title">模型加载失败</div>
+        <div class="h-kv">assets/models/dc-a2.glb 不可达</div>
+        <div class="h-kv" style="margin-top:4px">重建：node tools/export-layout.mjs &amp;&amp; blender --background --python tools/build_dc_model.py</div>`;
+    },
+  );
 
-  canvas.addEventListener("mousedown", (e) => {
-    const r = canvas.getBoundingClientRect();
-    drag = { x: e.clientX - r.left, y: e.clientY - r.top, yaw };
-    dragMoved = false;
-    canvas.classList.add("dragging");
-  });
-  window.addEventListener("mousemove", (e) => {
-    if (!canvas.offsetParent) return;
-    const r = canvas.getBoundingClientRect();
-    mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top;
-    if (drag) {
-      const dx = mouse.x - drag.x;
-      if (Math.abs(dx) > 3) dragMoved = true;
-      yaw = drag.yaw + dx * 0.006;
-      auto = false;
+  /* ── HUD / 图例（数据口径与设备清单一致）────────────── */
+  function renderHud() {
+    if (!hud) return;
+    if (!ready) {
+      hud.innerHTML = `<div class="h-title">A2 机房</div><div class="h-kv">正在加载 Blender 模型…</div>`;
       return;
     }
-    const hit = rackAt(mouse.x, mouse.y);
-    hoverId = hit ? hit.id : null;
-    canvas.style.cursor = hoverId ? "pointer" : "grab";
-  });
-  window.addEventListener("mouseup", () => {
-    if (drag && !dragMoved && hoverId) {
-      selId = hoverId;
-      renderHud();
-    }
-    drag = null;
-    canvas.classList.remove("dragging");
-  });
-  canvas.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    auto = false;
-    zoom = clamp(zoom * (e.deltaY > 0 ? 0.92 : 1.08), 0.55, 2.4);
-  }, { passive: false });
-
-  function renderHud() {
-    const hud = $("#dc3d-hud");
-    if (!hud) return;
+    const total = racks.length;
+    const managed = racks.filter(r => r.managed).length;
     const rk = racks.find(r => r.id === selId);
     if (!rk) {
       hud.innerHTML = `<div class="h-title">A2 机房 · 概览</div>
-        <div class="h-kv">机柜 14 · 纳管 3 · 服务器 4 · 网络设备 5</div>
+        <div class="h-kv">机柜 ${total} · 纳管 ${managed} · 服务器 ${D.servers.length} · 网络设备 ${D.netDevices.length}</div>
         <div class="h-kv">冷通道封闭 · 精密空调 ×4 · 双路供电</div>
-        <div style="margin-top:6px">点击任一机柜查看承载详情</div>`;
+        <div style="margin-top:6px">点击任一机柜查看承载详情 · Blender 建模 · WebGL 实时渲染</div>`;
       return;
     }
     if (!rk.managed) {
       hud.innerHTML = `<div class="h-title">机柜 ${esc(rk.id)}</div>
         <div class="h-kv">状态：未纳管</div>
-        <div style="margin-top:6px">该机柜不在当前管理范围（示例仅纳管 R01 / R04 / R05）</div>`;
+        <div style="margin-top:6px">该机柜不在当前管理范围（纳管 ${D.racks.map(r => r.id).join(" / ")}）</div>`;
       return;
     }
-    const meta = AXON_DATA.racks.find(r => r.id === rk.id);
+    const meta = D.racks.find(r => r.id === rk.id);
     const st = rackStats(rk.id);
     hud.innerHTML = `<div class="h-title">${esc(meta.name)} · ${esc(meta.note)}</div>
       <div class="h-kv">位置：A2 机房 · 03 列 ${rk.id}（U 位见「机柜部署」）</div>
@@ -305,34 +330,200 @@
       <div style="margin:6px 0 2px">${st.devs.map(m =>
         `<span class="dep-chip" data-3d-dev="${m.ref.id}" data-kind="${m.kind}">${esc(m.ref.name.replace(" · ", " "))}</span>`).join("")}</div>
       <button class="btn tiny" id="dc3d-open-rack">查看机柜 U 位</button>`;
-    $$("#dc3d-hud [data-3d-dev]").forEach(ch => ch.addEventListener("click", () => {
-      if (ch.dataset.kind === "server") AXON.emit("server-detail", ch.dataset["3dDev"]);
-      else {
-        const n = AXON_DATA.find(ch.dataset["3dDev"]);
-        AXON.toast(n.name, `${esc(n.model)} · ${esc(n.role)} · 管理口 ${esc(n.mgmt)}`, "info", 3800);
-      }
-    }));
+    $$("#dc3d-hud [data-3d-dev]").forEach(ch => ch.addEventListener("click", () => openDev(ch.dataset["3dDev"], ch.dataset.kind)));
     $("#dc3d-open-rack").onclick = () => { AXON.serversTab = "rack"; renderServersTab(); };
   }
 
+  function openDev(id, kind) {
+    if (kind === "server") AXON.emit("server-detail", id);
+    else {
+      const n = D.find(id);
+      AXON.toast(n.name, `${esc(n.model)} · ${esc(n.role)} · 管理口 ${esc(n.mgmt)}`, "info", 3800);
+    }
+  }
+
   $("#dc3d-legend").innerHTML =
-    `<span><i style="border-color:rgb(70,130,235)"></i>已纳管机柜</span>` +
-    `<span><i style="border-color:rgb(38,52,82)"></i>未纳管</span>` +
+    `<span><i style="border-color:var(--l-infra)"></i>已纳管机柜</span>` +
+    `<span><i style="border-color:var(--dc-rack-off)"></i>未纳管</span>` +
     `<span style="color:var(--orange)">● 硬件预警</span>` +
-    `<span>正面色块 = 服务器 / 网络设备 U 位</span>`;
+    `<span><i style="border-color:var(--l-server)"></i>服务器</span>` +
+    `<span><i style="border-color:var(--l-catalog)"></i>网络设备</span>` +
+    `<span><i style="border-color:var(--violet)"></i>带外</span>` +
+    `<span>Blender 建模 · glTF 实时渲染</span>`;
+
+  /* ── 拾取与交互 ──────────────────────────────────────── */
+  const ray = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  let selId = null, hoverId = null, hoverDev = null;
+  let downPos = null;
+
+  function pick(cx, cy) {
+    const r = canvas.getBoundingClientRect();
+    ndc.set(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ndc, camera);
+    const hits = ray.intersectObjects(pickables, false);
+    /* 前门玻璃会先命中：向后再找 0.2m 内的设备面，命中则视为点设备 */
+    for (let i = 0; i < hits.length; i++) {
+      const h = hits[i];
+      if (h.object.userData.devId) return { devId: h.object.userData.devId, rackId: rackOfMesh(h.object) };
+      if (h.object.name.startsWith("DOOR_")) {
+        for (let j = i + 1; j < hits.length && hits[j].distance - h.distance < 0.2; j++) {
+          if (hits[j].object.userData.devId) return { devId: hits[j].object.userData.devId, rackId: rackOfMesh(hits[j].object) };
+        }
+        return { devId: null, rackId: rackOfMesh(h.object) };
+      }
+      const rid = rackOfMesh(h.object);
+      if (rid) return { devId: null, rackId: rid };
+    }
+    return null;
+  }
+  function rackOfMesh(o) {
+    let p = o;
+    while (p) {
+      const m = /^RACK_(.+)$/.exec(p.name || "");
+      if (m) return m[1];
+      p = p.parent;
+    }
+    return null;
+  }
+
+  function setHover(h) {
+    if (hoverId && hoverId !== (h && h.rackId)) {
+      (rackBodyMats.get(hoverId) || []).forEach(({ mat }) => (mat.emissiveIntensity = 0));
+    }
+    hoverId = h ? h.rackId : null;
+    hoverDev = h ? h.devId : null;
+    if (hoverId) {
+      (rackBodyMats.get(hoverId) || []).forEach(({ mat }) => (mat.emissiveIntensity = 0.22));
+    }
+    canvas.style.cursor = h ? "pointer" : "grab";
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    downPos = { x: e.clientX, y: e.clientY };
+    canvas.classList.add("dragging");
+  });
+  window.addEventListener("pointerup", (e) => {
+    canvas.classList.remove("dragging");
+    if (!downPos) return;
+    const moved = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
+    downPos = null;
+    if (moved > 5 || !active() || !ready) return;
+    const hit = pick(e.clientX, e.clientY);
+    if (hit && hit.devId) { openDev(hit.devId, devKind(hit.devId)); return; }
+    selId = hit ? hit.rackId : null;
+    renderHud();
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!active() || !ready || downPos) return;
+    setHover(pick(e.clientX, e.clientY));
+  });
+  canvas.addEventListener("pointerleave", () => setHover(null));
+
+  function devKind(id) {
+    if (D.servers.some(s => s.id === id)) return "server";
+    const n = D.netDevices.find(x => x.id === id);
+    return n && n.kind === "bmc" ? "bmc" : "net";
+  }
+
+  /* ── 渲染循环（仅本页签可见时渲染）──────────────────── */
+  const active = () => AXON.view === "servers" && AXON.serversTab === "3d" && !document.hidden;
+
+  let W = 0;
+  function resize() {
+    const r = canvas.parentElement.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    const w = Math.round(r.width), h = Math.round(r.height);
+    W = w;
+    renderer.setSize(w, h, false);
+    composer.setSize(w, h);
+    bloom.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+
+  const t0 = performance.now();
+  let lastDraw = 0;
+  function frame() {
+    if (!active()) return;
+    if (!W) resize();
+    controls.update();
+    const t = (performance.now() - t0) / 1000;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 4);
+    /* 预警设备发光脉冲 */
+    devGlow.forEach(({ mats }) => mats.forEach(({ mat, base }) => {
+      mat.emissiveIntensity = base * (0.45 + 0.75 * pulse);
+    }));
+    warnDots.forEach(d => { d.material.opacity = 0.45 + 0.55 * pulse; });
+    /* 选中环 */
+    if (selId && rackGroups.has(selId)) {
+      const g = rackGroups.get(selId);
+      const wp = new THREE.Vector3();
+      g.getWorldPosition(wp);
+      selRing.position.set(wp.x, 0.02, wp.z);
+      selRing.visible = true;
+      selRing.material.opacity = 0.5 + 0.4 * pulse;
+      const s = 1 + 0.03 * Math.sin(t * 3);
+      selRing.scale.set(s, s, 1);
+    } else {
+      selRing.visible = false;
+    }
+    composer.render();
+    lastDraw = performance.now();
+  }
+  function loop() {
+    requestAnimationFrame(loop);
+    frame();
+  }
+  /* 页签被遮挡时 rAF 会停摆：低频心跳兜底出帧（预览/截图/投屏场景） */
+  setInterval(() => {
+    if (active() && performance.now() - lastDraw > 400) frame();
+  }, 250);
 
   AXON.on("servers-tab-3d", () => {
+    setHover(null);
     resize();
-    if (W) draw();          /* 后台标签页 rAF 暂停时保证至少渲染一帧 */
     renderHud();
-    requestAnimationFrame(() => { resize(); draw(); renderHud(); });
-    setTimeout(() => { resize(); draw(); }, 120);
+    requestAnimationFrame(() => { resize(); });
+    setTimeout(resize, 120);
   });
-  new ResizeObserver(() => { if (AXON.serversTab === "3d") resize(); }).observe(canvas.parentElement);
+  new ResizeObserver(() => { if (active()) resize(); }).observe(canvas.parentElement);
   resize();
   renderHud();
   requestAnimationFrame(loop);
 
-  AXON.dc3d = { rackAt, renderHud, state: () => ({ yaw, zoom, selId, auto }) };
+  /* ── 主题切换：底色 / 雾 / 灯光 / 发光色 / 标签随调色板刷新 ── */
+  function applyPalette() {
+    const bg = sceneColor();
+    scene.background.set(bg);
+    scene.fog.color.set(bg);
+    hemi.color.set(CV.num("steel"));
+    hemi.groundColor.set(bg);
+    rim.color.set(CV.num("accent"));
+    ptLights.forEach(p => p.color.set(CV.num("accentSoft")));
+    selRing.material.color.set(CV.num("accent"));
+    if (ready) {
+      applyDevGlow();
+      for (let i = 0; i < rackLabels.length; i++) {
+        const { sp, id, managed } = rackLabels[i];
+        const lb = labelSprite(id, CV.hex("textBright"), managed ? 0.95 : 0.5);
+        lb.position.copy(sp.position);
+        scene.remove(sp);
+        sp.material.map.dispose();
+        sp.material.dispose();
+        scene.add(lb);
+        rackLabels[i] = { sp: lb, id, managed };
+      }
+    }
+  }
+  AXON.on("theme", applyPalette);
+
+  AXON.dc3d = { renderHud, state: () => ({ selId, hoverId, auto: controls.autoRotate, ready }) };
   window.__dc3d = AXON.dc3d;   /* 调试/测试钩子 */
+  window.__dc3d_api = {        /* 调参入口：曝光 / 灯强 / 渲染统计 */
+    scene, camera, renderer, controls, composer,
+    lights: { hemi, key, rim, ptLights },
+    setExposure: (v) => { renderer.toneMappingExposure = v; },
+    info: () => renderer.info.render,
+  };
 })();

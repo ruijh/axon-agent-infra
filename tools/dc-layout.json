@@ -1,0 +1,352 @@
+{
+  "exportedAt": "2026-11-01T09:50:20.523Z",
+  "room": "A2 机房",
+  "size": {
+    "w": 22,
+    "d": 12
+  },
+  "rowY": {
+    "A": 3.4,
+    "B": 8.6
+  },
+  "rows": [
+    {
+      "id": "A",
+      "label": "03 列 · A 排",
+      "racks": [
+        "R01",
+        "R02",
+        "R03",
+        "R04",
+        "R05",
+        "R06",
+        "R07"
+      ]
+    },
+    {
+      "id": "B",
+      "label": "03 列 · B 排",
+      "racks": [
+        "R11",
+        "R12",
+        "R13",
+        "R14",
+        "R15",
+        "R16",
+        "R17"
+      ]
+    }
+  ],
+  "crac": [
+    {
+      "x": 0.6,
+      "y": 2.2
+    },
+    {
+      "x": 0.6,
+      "y": 5.2
+    },
+    {
+      "x": 0.6,
+      "y": 8.2
+    },
+    {
+      "x": 21.4,
+      "y": 5.2
+    }
+  ],
+  "managedRacks": [
+    {
+      "id": "R01",
+      "name": "网络柜 R01",
+      "note": "核心 / 带外网络"
+    },
+    {
+      "id": "R02",
+      "name": "机柜 R02",
+      "note": "业务知识库集群 ×4"
+    },
+    {
+      "id": "R03",
+      "name": "机柜 R03",
+      "note": "研发知识库集群 ×3"
+    },
+    {
+      "id": "R04",
+      "name": "机柜 R04",
+      "note": "GPU 推理 / 执行"
+    },
+    {
+      "id": "R05",
+      "name": "机柜 R05",
+      "note": "通用 / 存储"
+    },
+    {
+      "id": "R06",
+      "name": "机柜 R06",
+      "note": "安全审计存证 ×3"
+    }
+  ],
+  "devices": [
+    {
+      "id": "srv-gpu-01",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R04",
+      "u": [
+        20,
+        25
+      ]
+    },
+    {
+      "id": "srv-gpu-02",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R04",
+      "u": [
+        26,
+        31
+      ]
+    },
+    {
+      "id": "srv-cpu-01",
+      "kind": "server",
+      "state": "warn",
+      "rack": "R05",
+      "u": [
+        33,
+        34
+      ]
+    },
+    {
+      "id": "srv-sto-01",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R05",
+      "u": [
+        35,
+        36
+      ]
+    },
+    {
+      "id": "srv-gpu-03",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R04",
+      "u": [
+        14,
+        19
+      ]
+    },
+    {
+      "id": "srv-gpu-04",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R04",
+      "u": [
+        8,
+        13
+      ]
+    },
+    {
+      "id": "srv-cpu-02",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R05",
+      "u": [
+        29,
+        30
+      ]
+    },
+    {
+      "id": "srv-sto-02",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R05",
+      "u": [
+        24,
+        25
+      ]
+    },
+    {
+      "id": "srv-kbb-01",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R02",
+      "u": [
+        30,
+        31
+      ]
+    },
+    {
+      "id": "srv-kbb-02",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R02",
+      "u": [
+        27,
+        28
+      ]
+    },
+    {
+      "id": "srv-kbb-03",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R02",
+      "u": [
+        24,
+        25
+      ]
+    },
+    {
+      "id": "srv-kbb-04",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R02",
+      "u": [
+        21,
+        22
+      ]
+    },
+    {
+      "id": "srv-kbd-01",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R03",
+      "u": [
+        30,
+        31
+      ]
+    },
+    {
+      "id": "srv-kbd-02",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R03",
+      "u": [
+        27,
+        28
+      ]
+    },
+    {
+      "id": "srv-kbd-03",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R03",
+      "u": [
+        24,
+        25
+      ]
+    },
+    {
+      "id": "srv-aud-01",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R06",
+      "u": [
+        33,
+        34
+      ]
+    },
+    {
+      "id": "srv-aud-02",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R06",
+      "u": [
+        30,
+        31
+      ]
+    },
+    {
+      "id": "srv-aud-03",
+      "kind": "server",
+      "state": "ok",
+      "rack": "R06",
+      "u": [
+        27,
+        28
+      ]
+    },
+    {
+      "id": "sw-core-01",
+      "kind": "net",
+      "state": "ok",
+      "rack": "R01",
+      "u": [
+        41,
+        41
+      ]
+    },
+    {
+      "id": "sw-core-02",
+      "kind": "net",
+      "state": "ok",
+      "rack": "R01",
+      "u": [
+        40,
+        40
+      ]
+    },
+    {
+      "id": "sw-tor-gpu",
+      "kind": "net",
+      "state": "ok",
+      "rack": "R04",
+      "u": [
+        41,
+        41
+      ]
+    },
+    {
+      "id": "sw-tor-svc",
+      "kind": "net",
+      "state": "ok",
+      "rack": "R05",
+      "u": [
+        41,
+        41
+      ]
+    },
+    {
+      "id": "sw-bmc",
+      "kind": "bmc",
+      "state": "ok",
+      "rack": "R05",
+      "u": [
+        40,
+        40
+      ]
+    },
+    {
+      "id": "sw-tor-kbb",
+      "kind": "net",
+      "state": "ok",
+      "rack": "R02",
+      "u": [
+        41,
+        41
+      ]
+    },
+    {
+      "id": "sw-tor-kbd",
+      "kind": "net",
+      "state": "ok",
+      "rack": "R03",
+      "u": [
+        41,
+        41
+      ]
+    },
+    {
+      "id": "sw-tor-aud",
+      "kind": "net",
+      "state": "ok",
+      "rack": "R06",
+      "u": [
+        41,
+        41
+      ]
+    }
+  ]
+}

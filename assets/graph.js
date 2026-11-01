@@ -7,6 +7,7 @@
 (function () {
   const canvas = $("#topo-canvas");
   const ctx = canvas.getContext("2d");
+  const CV = window.AXON_CV;
   let G = AXON_DATA.buildGraph();
   const nodes = new Map(G.nodes.map(n => [n.id, n]));
   const edges = G.edges;
@@ -190,7 +191,7 @@
       const colNodes = G.nodes.filter(n => n.layer === ci);
       if (!colNodes.length) continue;
       const x = colNodes[0].bx;
-      ctx.fillStyle = "rgba(130,150,189,.55)";
+      ctx.fillStyle = CV.rgba("textDim", .55);
       ctx.fillText("L" + ci + " · " + LAYER_META[ci].name, x, 26);
     }
 
@@ -204,14 +205,14 @@
       const dx = Math.max(40, (p0.x - p3.x) * 0.45);
       const p1 = { x: p0.x - dx, y: p0.y }, p2 = { x: p3.x + dx, y: p3.y };
 
-      let alpha = 0.13, color = "110,180,255", width = 1;
+      let alpha = 0.13, color = CV.tri("steel"), width = 1;
       if (focus) {
-        if (focus.has(e.from) && focus.has(e.to)) { alpha = 0.6; width = 1.5; color = "90,220,255"; }
+        if (focus.has(e.from) && focus.has(e.to)) { alpha = 0.6; width = 1.5; color = CV.tri("accentSoft"); }
         else alpha = 0.035;
       }
       if (impactSet && impactSet.has(e.from) && impactSet.has(e.to) && (e.from === impactRoot || e.to === impactRoot || impactSet.has(e.from) && impactSet.has(e.to))) {
-        if (e.from === impactRoot || e.to === impactRoot) { color = "255,77,109"; alpha = 0.85; width = 2; }
-        else { color = "255,120,150"; alpha = 0.5; width = 1.4; }
+        if (e.from === impactRoot || e.to === impactRoot) { color = CV.tri("crit"); alpha = 0.85; width = 2; }
+        else { color = CV.tri("crit"); alpha = 0.5; width = 1.4; }
       }
       ctx.strokeStyle = `rgba(${color},${alpha})`;
       ctx.lineWidth = width;
@@ -232,8 +233,8 @@
       p.t += p.v;
       const pt = bez(g[0], g[1], g[2], g[3], ease(clamp(p.t, 0, 1)));
       const hot = p.hot;
-      ctx.fillStyle = hot ? "rgba(255,99,130,.95)" : "rgba(140,230,255,.9)";
-      ctx.shadowColor = hot ? "rgba(255,77,109,.9)" : "rgba(55,226,255,.8)";
+      ctx.fillStyle = hot ? CV.rgba("crit", .95) : CV.rgba("accentSoft", .9);
+      ctx.shadowColor = hot ? CV.rgba("crit", .9) : CV.rgba("accent", .8);
       ctx.shadowBlur = 6;
       ctx.beginPath();
       ctx.arc(pt.x, pt.y, hot ? 2.2 : 1.7, 0, Math.PI * 2);
@@ -255,7 +256,7 @@
 
       /* 影响脉冲圈 */
       if (inImpact && !REDUCED) {
-        ctx.strokeStyle = `rgba(255,77,109,${0.35 + 0.4 * pulse})`;
+        ctx.strokeStyle = CV.rgba("crit", 0.35 + 0.4 * pulse);
         ctx.lineWidth = 1.4;
         const rr = 6 + pulse * 5;
         ctx.beginPath();
@@ -264,11 +265,11 @@
       }
 
       /* 芯片底 */
-      ctx.fillStyle = "rgba(9,17,35,.92)";
-      ctx.strokeStyle = isRoot ? "#ff4d6d" : inImpact ? "rgba(255,99,130,.85)" : col + "cc";
+      ctx.fillStyle = CV.rgba("node", .92);
+      ctx.strokeStyle = isRoot ? CV.color("crit") : inImpact ? CV.rgba("crit", .85) : col + "cc";
       ctx.lineWidth = n.id === selId || n.id === hoverId ? 1.8 : 1.1;
       if (n.id === selId || n.id === hoverId) { ctx.shadowColor = col; ctx.shadowBlur = 13; }
-      if (isRoot) { ctx.shadowColor = "#ff4d6d"; ctx.shadowBlur = 18; }
+      if (isRoot) { ctx.shadowColor = CV.color("crit"); ctx.shadowBlur = 18; }
       ctx.beginPath();
       ctx.roundRect(p.x - n.w / 2, p.y - n.h / 2, n.w, n.h, 5);
       ctx.fill();
@@ -276,15 +277,15 @@
       ctx.shadowBlur = 0;
 
       /* 顶条（层色） */
-      ctx.fillStyle = inImpact ? "rgba(255,77,109,.8)" : col;
+      ctx.fillStyle = inImpact ? CV.rgba("crit", .8) : col;
       ctx.fillRect(p.x - n.w / 2, p.y - n.h / 2, n.w, 2.4);
 
       /* 状态点（服务器预警 / 任务状态） */
       let dot = null;
-      if (n.type === "server" && n.ref.state === "warn") dot = "#ffb340";
+      if (n.type === "server" && n.ref.state === "warn") dot = CV.color("warn");
       if (n.type === "task") {
         const st = n.ref.state;
-        dot = st === "unknown" ? "#ff4d6d" : (st === "waiting_approval" || st === "queued") ? "#ffb340" : st === "checkpointed" ? "#37e2ff" : null;
+        dot = st === "unknown" ? CV.color("crit") : (st === "waiting_approval" || st === "queued") ? CV.color("warn") : st === "checkpointed" ? CV.color("accent") : null;
       }
       if (dot) {
         ctx.fillStyle = dot;
@@ -297,11 +298,11 @@
 
       /* 文本 */
       ctx.textAlign = "left";
-      ctx.fillStyle = "rgba(216,231,255,.96)";
+      ctx.fillStyle = CV.rgba("textBright", .96);
       ctx.font = '11.5px "Segoe UI","Microsoft YaHei",sans-serif';
       const gx = p.x - n.w / 2 + 8;
       ctx.fillText((GLYPH[n.type] || "◈") + " " + n.label, gx, p.y - 2);
-      ctx.fillStyle = "rgba(130,150,189,.85)";
+      ctx.fillStyle = CV.rgba("textDim", .85);
       ctx.font = '9.5px Consolas,monospace';
       ctx.fillText(n.sub || "", gx, p.y + 12);
       ctx.globalAlpha = 1;
@@ -434,11 +435,15 @@
   }
   AXON.renderSide = renderSide;
 
-  /* 图例 */
-  $("#topo-legend").innerHTML =
-    Object.values(LAYER_META).map(l => `<span><i style="background:${l.color}"></i>${l.name}</span>`).join("") +
-    `<span class="sep"></span><span class="flow">● 粒子 = 依赖调用方向（任务 → 服务器）</span>` +
-    `<span class="sep"></span><span style="color:var(--text-dim)">虚线 = 遥测推断关系（区别于显式声明 · 有时效）</span>`;
+  /* 图例（主题切换时随 LAYER_META 重建） */
+  function renderTopoLegend() {
+    $("#topo-legend").innerHTML =
+      Object.values(LAYER_META).map(l => `<span><i style="background:${l.color}"></i>${l.name}</span>`).join("") +
+      `<span class="sep"></span><span class="flow">● 粒子 = 依赖调用方向（任务 → 服务器）</span>` +
+      `<span class="sep"></span><span style="color:var(--text-dim)">虚线 = 遥测推断关系（区别于显式声明 · 有时效）</span>`;
+  }
+  renderTopoLegend();
+  AXON.on("theme", renderTopoLegend);
 
   /* 生命周期 */
   new ResizeObserver(() => resize()).observe(canvas.parentElement);
