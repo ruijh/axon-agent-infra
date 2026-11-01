@@ -182,13 +182,18 @@
             <p class="view-sub">任务 → Agent → Infra 服务 → 服务器 的承载与依赖关系</p>
           </div>
           <div class="topo-tools">
+            <div class="subtabs" id="topo-mode-tabs">
+              <button class="subtab active" data-mode="3d">3D 视图</button>
+              <button class="subtab" data-mode="2d">2D 视图</button>
+            </div>
             <button class="btn ghost" id="btn-impact-mode"><i class="dot"></i>影响分析模式</button>
             <button class="btn ghost" id="btn-topo-reset">重置视图</button>
           </div>
         </div>
         <div class="topo-wrap">
           <div class="topo-canvas-wrap">
-            <canvas id="topo-canvas"></canvas>
+            <canvas id="topo-canvas" hidden></canvas>
+            <canvas id="topo3d-canvas"></canvas>
             <div class="topo-legend" id="topo-legend"></div>
             <div class="topo-impact-bar" id="topo-impact-bar" hidden></div>
           </div>
@@ -365,6 +370,7 @@
 <script src="assets/views.js"></script>
 <script src="assets/net.js"></script>
 <script type="module" src="assets/dc3d.js"></script>
+<script type="module" src="assets/topo3d.js"></script>
 <script src="assets/flow.js"></script>
 <script src="assets/livesim.js"></script>
 <script src="assets/live.js"></script>

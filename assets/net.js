@@ -280,6 +280,9 @@
     `<span><i style="border-color:var(--violet)"></i>带外管理</span>` +
     `<span style="color:var(--cyan)">● 粒子 = 实时流量</span>`;
 
+  /* 主题切换：分区框颜色在 layout() 固化，需重算（下一次 draw 生效） */
+  AXON.on("theme", () => { if (W) layout(); });
+
   /* 生命周期：子页激活时布局 + 渲染 */
   AXON.on("servers-tab-net", () => {
     resize();

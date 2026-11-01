@@ -18,7 +18,7 @@
     green: "--green", steel: "--steel", orange: "--orange",
     l0: "--l-server", l1: "--l-infra", l2: "--l-catalog", l3: "--l-agent", l4: "--l-task",
     text: "--text", textDim: "--text-dim", textFaint: "--text-faint", textBright: "--text-bright",
-    node: "--nodebg-hex",
+    node: "--nodebg-hex", bg1: "--bg1",
     dcManaged: "--dc-managed", dcRackOff: "--dc-rack-off", dcFloor: "--dc-floor",
     dcBg: "--dc-2",
   };

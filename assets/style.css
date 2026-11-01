@@ -572,6 +572,8 @@ body::after {
 }
 #topo-canvas { width: 100%; height: 100%; display: block; cursor: grab; }
 #topo-canvas.grabbing { cursor: grabbing; }
+#topo3d-canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+#topo3d-canvas.dragging { cursor: grabbing; }
 
 .topo-legend {
   position: absolute; left: 12px; bottom: 10px;
