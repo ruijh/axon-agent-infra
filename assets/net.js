@@ -23,32 +23,46 @@
     nodes.push(node); nodeMap.set(n.id, node);
   });
   AXON_DATA.servers.forEach(s => {
-    const node = { id: s.id, kind: "server", ref: s, row: 2, w: 122, h: 44 };
+    const node = { id: s.id, kind: "server", ref: s, row: 2, w: 86, h: 40 };
     nodes.push(node); nodeMap.set(s.id, node);
   });
 
   let W = 0, H = 0, hoverId = null, selId = null, mouse = { x: -1, y: -1 };
   let particles = [];
 
-  const ROW_Y = [58, 200, 344];
-  const ROW_X = { 0: [0.30, 0.70], 1: [0.18, 0.50, 0.82], 2: [0.13, 0.38, 0.63, 0.88] };
-  /* 固定语义排序，避免布局跳动 */
-  const ROW_ORDER = {
-    0: ["sw-core-01", "sw-core-02"],
-    1: ["sw-tor-gpu", "sw-tor-svc", "sw-bmc"],
-    2: ["srv-gpu-01", "srv-gpu-02", "srv-cpu-01", "srv-sto-01"],
-  };
+  /* 按机柜分组的数据驱动布局：核心层 / 接入层（ToR + 带外）/ 服务器 2×N */
+  const ROW_Y = [52, 138, 232, 306];
+  const RACK_TOR = { R02: "sw-tor-kbb", R03: "sw-tor-kbd", R04: "sw-tor-gpu", R05: "sw-tor-svc", R06: "sw-tor-aud" };
+  const RACK_LABEL = { R02: "R02 · 业务知识库", R03: "R03 · 研发知识库", R04: "R04 · GPU 柜", R05: "R05 · 通用 / 存储", R06: "R06 · 审计存证" };
+  const ZONE_COLORS = ["61,226,255", "61,226,255", "111,155,255", "177,140,255", "255,179,64"];
+  let zones = [];
 
   function layout() {
-    [0, 1, 2].forEach(r => {
-      const ids = ROW_ORDER[r];
-      ids.forEach((id, i) => {
-        const n = nodeMap.get(id);
+    const rackIds = Object.keys(RACK_TOR);
+    const L = 26, R = W - 150;
+    const bandW = Math.max(120, (R - L) / rackIds.length);
+    zones = [{ label: "R01 · 网络柜（核心）", x0: 0.24, x1: 0.76, y0: 16, y1: 84, color: "255,147,80" }];
+    rackIds.forEach((rid, i) => {
+      const x0 = L + bandW * i, x1 = L + bandW * (i + 1);
+      const tor = nodeMap.get(RACK_TOR[rid]);
+      if (tor) { tor.x = (x0 + x1) / 2; tor.y = ROW_Y[1]; }
+      const srvs = AXON_DATA.servers.filter(s => s.location.rack === rid);
+      const cols = srvs.length > 2 ? 2 : 1;
+      srvs.forEach((s, j) => {
+        const n = nodeMap.get(s.id);
         if (!n) return;
-        n.x = 70 + (W - 140) * ROW_X[r][i];
-        n.y = ROW_Y[r];
+        const col = Math.floor(j / 2), row = j % 2;
+        n.x = cols === 1 ? (x0 + x1) / 2 : x0 + bandW * (col + 0.5) / cols;
+        n.y = ROW_Y[2] + row * (ROW_Y[3] - ROW_Y[2]);
       });
+      zones.push({ label: RACK_LABEL[rid], x0: (x0 - 6) / W, x1: (x1 + 6) / W, y0: 106, y1: 350, color: ZONE_COLORS[i] });
     });
+    ["sw-core-01", "sw-core-02"].forEach((id, i) => {
+      const n = nodeMap.get(id);
+      if (n) { n.x = 70 + (W - 140) * (i === 0 ? 0.32 : 0.68); n.y = ROW_Y[0]; }
+    });
+    const bmc = nodeMap.get("sw-bmc");
+    if (bmc) { bmc.x = W - 78; bmc.y = ROW_Y[1]; }
   }
 
   function resize() {
@@ -113,16 +127,9 @@
 
   const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
 
-  /* 机柜分组区：同柜设备聚合展示 */
-  const RACK_ZONES = [
-    { label: "R01 · 网络柜（核心）", x0: 0.20, x1: 0.80, y0: 18, y1: 84, color: "255,147,80" },
-    { label: "R04 · GPU 柜", x0: 0.02, x1: 0.455, y0: 152, y1: 386, color: "111,155,255" },
-    { label: "R05 · 通用 / 存储柜", x0: 0.455, x1: 0.98, y0: 152, y1: 386, color: "177,140,255" },
-  ];
-
   function drawZones() {
     ctx.save();
-    RACK_ZONES.forEach(z => {
+    zones.forEach(z => {
       const x = z.x0 * W, w = (z.x1 - z.x0) * W;
       ctx.strokeStyle = `rgba(${z.color},.28)`;
       ctx.fillStyle = `rgba(${z.color},.028)`;
@@ -150,7 +157,7 @@
     /* 分层标题 */
     ctx.font = "10px Consolas,monospace";
     ctx.textAlign = "left";
-    [["L0 · 核心层 Spine", ROW_Y[0]], ["L1 · 接入层 Leaf / 带外", ROW_Y[1]], ["L2 · 服务器", ROW_Y[2]]].forEach(([t, y]) => {
+    [["L0 · 核心层 Spine", ROW_Y[0]], ["L1 · 接入层 Leaf / 带外", ROW_Y[1]], ["L2 · 服务器（按机柜分组）", ROW_Y[2]]].forEach(([t, y]) => {
       ctx.fillStyle = "rgba(130,150,189,.55)";
       ctx.fillText(t, 14, y - 32);
     });
@@ -222,8 +229,8 @@
 
       ctx.textAlign = "left";
       ctx.fillStyle = "rgba(216,231,255,.96)";
-      ctx.font = '11px "Segoe UI","Microsoft YaHei",sans-serif';
-      const label = n.kind === "server" ? n.ref.name.replace(" · ", " ") : n.ref.short;
+      ctx.font = '10.5px Consolas,"Segoe UI",monospace';
+      const label = n.kind === "server" ? n.ref.id.replace("srv-", "") : n.ref.short;
       ctx.fillText((GLYPH[n.kind] || "◈") + " " + label, n.x - n.w / 2 + 8, n.y - 2);
       ctx.fillStyle = "rgba(130,150,189,.85)";
       ctx.font = "9px Consolas,monospace";

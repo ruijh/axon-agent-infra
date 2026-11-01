@@ -51,13 +51,102 @@ const AXON_DATA = {
         { port: "port-2", speed: "100G", to: "sw-tor-svc · 26", vlan: "VLAN 130" },
         { port: "bmc", speed: "1G", to: "sw-bmc · 12", vlan: "VLAN 9" }],
       parts: [["CPU", "2× Xeon Silver 4410Y", "ok"], ["内存", "8× 64G DDR5-4800", "ok"], ["存储", "12× 8T NVMe · 双副本", "ok"], ["网卡", "2× 25G + 2× 100G", "ok"]],
-      slots: Array.from({ length: 12 }, (_, i) => ({ no: i + 1, type: "8T NVMe · 检查点/记忆", state: "ok" })) },
+      slots: Array.from({ length: 12 }, (_, i) => ({ no: i + 1, type: "8T NVMe · 检查点/记忆", state: "ok" })),
+    },
   ],
+
+  /* ── 节点扩容与场景化集群 ────────────────────────────────
+     ① 既有类型扩容：GPU 推理 / GPU 执行 / 通用服务 / 状态存储
+     ② 场景集群（Agent Infra 依赖的知识与合规设施）：
+        业务知识库集群 R02×4（客服/经营检索 · ag-cs / ag-bi 依赖）
+        研发知识库集群 R03×3（代码/文档索引 · ag-coder 依赖）
+        安全审计存证集群 R06×3（WORM 归档 · ag-risk 依赖） */
+  __expandServers: function () {
+    const NIC = (tor, ports, vlan) => ([
+      { port: "port-1", speed: ports, to: `${tor} · 25`, vlan },
+      { port: "port-2", speed: ports, to: `${tor} · 26`, vlan },
+      { port: "bmc", speed: "1G", to: `sw-bmc · ${30 + AXON_DATA.servers.length}`, vlan: "VLAN 9" },
+    ]);
+    const mk = (o) => AXON_DATA.servers.push(Object.assign({
+      state: "ok", cpu: 30, mem: 50, gpu: 0, power: "0.6 kW", temp: 39, fan: 32, uptime: "30d",
+      bios: "4.8.1", bmcFw: "3.3.2",
+      parts: [["CPU", "2× Xeon Gold 6430", "ok"], ["内存", "8× 64G DDR5-4800", "ok"], ["网卡", "2× 25G OCP", "ok"]],
+      slots: [{ no: 1, type: "3.84T NVMe · 数据", state: "ok" }, { no: 2, type: "3.84T NVMe · 数据", state: "ok" }],
+    }, o));
+    const A2 = "A2 机房", ROW = "03 列";
+
+    /* ① 既有类型扩容 */
+    mk({ id: "srv-gpu-03", name: "GPU 推理节点 · 03", model: "NF5468M6 · 8×A100-80G", role: "推理",
+      cpu: 41, mem: 58, gpu: 73, power: "3.0 kW", temp: 45, fan: 40, uptime: "23d", asset: "AST-10245", bmc: "10.32.0.15",
+      location: { room: A2, row: ROW, rack: "R04", u: [14, 19] },
+      nics: NIC("sw-tor-gpu", "100G", "VLAN 110"),
+      parts: [["CPU", "2× Xeon Platinum 8568Y+", "ok"], ["内存", "16× 64G DDR5-5600", "ok"], ["GPU", "8× A100-80G SXM", "ok"], ["网卡", "2× 100G OCP 3.0", "ok"]] });
+    mk({ id: "srv-gpu-04", name: "GPU 执行节点 · 04", model: "NF5468M6 · 8×A100-80G", role: "沙箱执行",
+      cpu: 47, mem: 62, gpu: 66, power: "3.2 kW", temp: 47, fan: 48, uptime: "21d", asset: "AST-10246", bmc: "10.32.0.16",
+      location: { room: A2, row: ROW, rack: "R04", u: [8, 13] },
+      nics: NIC("sw-tor-gpu", "100G", "VLAN 110"),
+      parts: [["CPU", "2× Xeon Platinum 8568Y+", "ok"], ["内存", "16× 64G DDR5-5600", "ok"], ["GPU", "8× A100-80G SXM", "ok"], ["网卡", "2× 100G OCP 3.0", "ok"]] });
+    mk({ id: "srv-cpu-02", name: "通用服务节点 · 02", model: "NF5280M6 · 2×Xeon 8568Y+", role: "网关/平台服务 · 扩容",
+      cpu: 33, mem: 48, power: "0.7 kW", temp: 40, fan: 33, uptime: "61d", asset: "AST-10247", bmc: "10.32.0.17",
+      location: { room: A2, row: ROW, rack: "R05", u: [29, 30] },
+      nics: NIC("sw-tor-svc", "25G", "VLAN 120"),
+      parts: [["CPU", "2× Xeon Gold 6430", "ok"], ["内存", "8× 64G DDR5-4800", "ok"], ["网卡", "4× 25G OCP", "ok"]] });
+    mk({ id: "srv-sto-02", name: "状态存储节点 · 02", model: "NF5266M6 · 12×NVMe 8T", role: "检查点/记忆 · 扩容",
+      cpu: 19, mem: 43, power: "0.6 kW", temp: 37, fan: 29, uptime: "61d", asset: "AST-10248", bmc: "10.32.0.18",
+      location: { room: A2, row: ROW, rack: "R05", u: [24, 25] },
+      nics: NIC("sw-tor-svc", "100G", "VLAN 130"),
+      parts: [["CPU", "2× Xeon Silver 4410Y", "ok"], ["内存", "8× 64G DDR5-4800", "ok"], ["存储", "12× 8T NVMe · 双副本", "ok"]],
+      slots: Array.from({ length: 12 }, (_, i) => ({ no: i + 1, type: "8T NVMe · 检查点/记忆", state: "ok" })) });
+
+    /* ② 业务知识库集群 · R02 ×4（ag-cs / ag-bi → st-kb-biz）*/
+    [
+      ["01", "知识库 · 向量检索 / 写入", 30, 26, 74, "10.32.0.19", "AST-10249", 44],
+      ["02", "知识库 · 副本 / 检索", 36, 33, 68, "10.32.0.20", "AST-10250", 41],
+      ["03", "知识库 · 重排 / 缓存", 44, 41, 71, "10.32.0.21", "AST-10251", 47],
+      ["04", "知识库 · 入库流水线", 52, 49, 62, "10.32.0.22", "AST-10252", 43],
+    ].forEach(([n, role, cpu, fan, mem, bmc, asset, temp], i) => mk({
+      id: `srv-kbb-${n}`, name: `业务知识库节点 · ${n}`, model: "NF5280M6 · 2×Xeon 6430 + 6×NVMe",
+      role, cpu, mem, fan, temp, bmc, asset, power: "0.65 kW", uptime: `${120 - i * 9}d`,
+      location: { room: A2, row: ROW, rack: "R02", u: [30 - i * 3, 31 - i * 3] },
+      nics: NIC("sw-tor-kbb", "25G", "VLAN 140 · 业务知识库"),
+      slots: Array.from({ length: 6 }, (_, j) => ({ no: j + 1, type: "3.84T NVMe · 向量/索引", state: "ok" })),
+    }));
+
+    /* ③ 研发知识库集群 · R03 ×3（ag-coder → st-kb-dev）*/
+    [
+      ["01", "知识库 · 代码索引 / 写入", 38, 30, 66, "10.32.0.23", "AST-10253", 42],
+      ["02", "知识库 · 嵌入检索", 29, 26, 60, "10.32.0.24", "AST-10254", 40],
+      ["03", "知识库 · 文档解析流水线", 47, 38, 58, "10.32.0.25", "AST-10255", 44],
+    ].forEach(([n, role, cpu, fan, mem, bmc, asset, temp], i) => mk({
+      id: `srv-kbd-${n}`, name: `研发知识库节点 · ${n}`, model: "NF5280M6 · 2×Xeon 6430 + 4×NVMe",
+      role, cpu, mem, fan, temp, bmc, asset, power: "0.6 kW", uptime: `${98 - i * 11}d`,
+      location: { room: A2, row: ROW, rack: "R03", u: [30 - i * 3, 31 - i * 3] },
+      nics: NIC("sw-tor-kbd", "25G", "VLAN 141 · 研发知识库"),
+      slots: Array.from({ length: 4 }, (_, j) => ({ no: j + 1, type: "3.84T NVMe · 代码索引", state: "ok" })),
+    }));
+
+    /* ④ 安全审计存证集群 · R06 ×3（ag-risk → st-audit）*/
+    [
+      ["01", "审计存证 · WORM 归档", 24, 27, 51, "10.32.0.26", "AST-10256", 38],
+      ["02", "审计存证 · 校验 / 巡检", 31, 30, 47, "10.32.0.27", "AST-10257", 39],
+      ["03", "审计存证 · 检索 / 取证", 27, 24, 44, "10.32.0.28", "AST-10258", 37],
+    ].forEach(([n, role, cpu, fan, mem, bmc, asset, temp], i) => mk({
+      id: `srv-aud-${n}`, name: `安全审计节点 · ${n}`, model: "NF5266M6 · 12×NVMe 8T · WORM",
+      role, cpu, mem, fan, temp, bmc, asset, power: "0.55 kW", uptime: `${150 - i * 13}d`,
+      location: { room: A2, row: ROW, rack: "R06", u: [33 - i * 3, 34 - i * 3] },
+      nics: NIC("sw-tor-aud", "25G", "VLAN 150 · 审计存证"),
+      parts: [["CPU", "2× Xeon Silver 4410Y", "ok"], ["内存", "8× 64G DDR5-4800", "ok"], ["存储", "12× 8T NVMe · WORM", "ok"]],
+      slots: Array.from({ length: 12 }, (_, j) => ({ no: j + 1, type: "8T NVMe · WORM 归档", state: "ok" })),
+    }));
+  },
 
   racks: [
     { id: "R01", name: "网络柜 R01", room: "A2 机房 · 03 列", note: "核心 / 带外网络" },
+    { id: "R02", name: "机柜 R02", room: "A2 机房 · 03 列", note: "业务知识库集群 ×4" },
+    { id: "R03", name: "机柜 R03", room: "A2 机房 · 03 列", note: "研发知识库集群 ×3" },
     { id: "R04", name: "机柜 R04", room: "A2 机房 · 03 列", note: "GPU 推理 / 执行" },
     { id: "R05", name: "机柜 R05", room: "A2 机房 · 03 列", note: "通用 / 存储" },
+    { id: "R06", name: "机柜 R06", room: "A2 机房 · 03 列", note: "安全审计存证 ×3" },
   ],
 
   /* 机房平面布局（米制，等轴 3D 与平面图共用） */
@@ -84,6 +173,12 @@ const AXON_DATA = {
       state: "ok", mgmt: "10.32.1.12", role: "接入 / Leaf", location: { rack: "R05", u: [41, 41] } },
     { id: "sw-bmc", name: "带外管理交换机", short: "带外 SW", model: "S5735S-24P4X · 24×1G", kind: "bmc",
       state: "ok", mgmt: "10.32.1.20", role: "BMC 带外", location: { rack: "R05", u: [40, 40] } },
+    { id: "sw-tor-kbb", name: "知识库柜 ToR 03", short: "ToR · 业务KB", model: "S9825-48Y8C · 48×25G + 8×100G", kind: "tor",
+      state: "ok", mgmt: "10.32.1.13", role: "接入 / Leaf", location: { rack: "R02", u: [41, 41] } },
+    { id: "sw-tor-kbd", name: "知识库柜 ToR 04", short: "ToR · 研发KB", model: "S9825-48Y8C · 48×25G + 8×100G", kind: "tor",
+      state: "ok", mgmt: "10.32.1.14", role: "接入 / Leaf", location: { rack: "R03", u: [41, 41] } },
+    { id: "sw-tor-aud", name: "审计柜 ToR 05", short: "ToR · 审计", model: "S9825-48Y8C · 48×25G + 8×100G", kind: "tor",
+      state: "ok", mgmt: "10.32.1.15", role: "接入 / Leaf", location: { rack: "R06", u: [41, 41] } },
   ],
 
   /* 沙箱实例（对标 OpenSandbox Lifecycle · SPEC §2.9）
@@ -142,6 +237,41 @@ const AXON_DATA = {
     { from: "srv-gpu-02", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 5, w: 1 },
     { from: "srv-cpu-01", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 4, w: 1 },
     { from: "srv-sto-01", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 4, w: 1 },
+
+    /* 场景集群与扩容节点接入（业务链路 + 上行 + 带外）*/
+    { from: "srv-gpu-03", to: "sw-tor-gpu", speed: "2×100G", type: "业务", vlan: "VLAN 110 · 推理业务", util: 44, w: 2.2 },
+    { from: "srv-gpu-04", to: "sw-tor-gpu", speed: "2×100G", type: "业务", vlan: "VLAN 110 · 沙箱执行", util: 39, w: 2.2 },
+    { from: "srv-cpu-02", to: "sw-tor-svc", speed: "2×25G", type: "业务", vlan: "VLAN 120 · 平台服务", util: 18, w: 1.6 },
+    { from: "srv-sto-02", to: "sw-tor-svc", speed: "2×100G", type: "业务", vlan: "VLAN 130 · 检查点存储", util: 28, w: 2.2 },
+    { from: "srv-kbb-01", to: "sw-tor-kbb", speed: "2×25G", type: "业务", vlan: "VLAN 140 · 业务知识库", util: 41, w: 1.6 },
+    { from: "srv-kbb-02", to: "sw-tor-kbb", speed: "2×25G", type: "业务", vlan: "VLAN 140 · 业务知识库", util: 33, w: 1.6 },
+    { from: "srv-kbb-03", to: "sw-tor-kbb", speed: "2×25G", type: "业务", vlan: "VLAN 140 · 业务知识库", util: 26, w: 1.6 },
+    { from: "srv-kbb-04", to: "sw-tor-kbb", speed: "2×25G", type: "业务", vlan: "VLAN 140 · 业务知识库", util: 22, w: 1.6 },
+    { from: "srv-kbd-01", to: "sw-tor-kbd", speed: "2×25G", type: "业务", vlan: "VLAN 141 · 研发知识库", util: 37, w: 1.6 },
+    { from: "srv-kbd-02", to: "sw-tor-kbd", speed: "2×25G", type: "业务", vlan: "VLAN 141 · 研发知识库", util: 24, w: 1.6 },
+    { from: "srv-kbd-03", to: "sw-tor-kbd", speed: "2×25G", type: "业务", vlan: "VLAN 141 · 研发知识库", util: 19, w: 1.6 },
+    { from: "srv-aud-01", to: "sw-tor-aud", speed: "2×25G", type: "业务", vlan: "VLAN 150 · 审计存证", util: 16, w: 1.6 },
+    { from: "srv-aud-02", to: "sw-tor-aud", speed: "2×25G", type: "业务", vlan: "VLAN 150 · 审计存证", util: 12, w: 1.6 },
+    { from: "srv-aud-03", to: "sw-tor-aud", speed: "2×25G", type: "业务", vlan: "VLAN 150 · 审计存证", util: 9, w: 1.6 },
+    { from: "sw-tor-kbb", to: "sw-core-01", speed: "2×100G", type: "上行", vlan: "Trunk · ECMP", util: 34, w: 2.2 },
+    { from: "sw-tor-kbb", to: "sw-core-02", speed: "2×100G", type: "上行", vlan: "Trunk · 冗余", util: 7, w: 2.2 },
+    { from: "sw-tor-kbd", to: "sw-core-01", speed: "2×100G", type: "上行", vlan: "Trunk · ECMP", util: 28, w: 2.2 },
+    { from: "sw-tor-kbd", to: "sw-core-02", speed: "2×100G", type: "上行", vlan: "Trunk · 冗余", util: 5, w: 2.2 },
+    { from: "sw-tor-aud", to: "sw-core-01", speed: "1×100G", type: "上行", vlan: "Trunk · 审计隔离", util: 13, w: 2.2 },
+    { from: "srv-gpu-03", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 6, w: 1 },
+    { from: "srv-gpu-04", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 5, w: 1 },
+    { from: "srv-cpu-02", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 4, w: 1 },
+    { from: "srv-sto-02", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 4, w: 1 },
+    { from: "srv-kbb-01", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 5, w: 1 },
+    { from: "srv-kbb-02", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 4, w: 1 },
+    { from: "srv-kbb-03", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 4, w: 1 },
+    { from: "srv-kbb-04", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 3, w: 1 },
+    { from: "srv-kbd-01", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 4, w: 1 },
+    { from: "srv-kbd-02", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 3, w: 1 },
+    { from: "srv-kbd-03", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 3, w: 1 },
+    { from: "srv-aud-01", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 3, w: 1 },
+    { from: "srv-aud-02", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 3, w: 1 },
+    { from: "srv-aud-03", to: "sw-bmc", speed: "1G", type: "带外", vlan: "VLAN 9 · BMC", util: 2, w: 1 },
   ],
 
   infra: [
@@ -160,6 +290,12 @@ const AXON_DATA = {
       state: "ok", hitRate: 94, desc: "跨会话长期记忆 · 共享 Store" },
     { id: "svc-iam", kind: "identity", name: "身份与凭据服务", ver: "3.4", host: "srv-sto-01",
       state: "ok", creds: 27, desc: "Agent 身份 / 委托凭据 / 撤销传播" },
+    { id: "st-kb-biz", kind: "state", name: "业务知识库集群", ver: "Milvus 2.4", host: "srv-kbb-01",
+      state: "ok", nodes: 4, hitRate: 92, desc: "客服/经营知识检索 · 向量 + 重排（4 节点 · 3 副本）" },
+    { id: "st-kb-dev", kind: "state", name: "研发知识库集群", ver: "Milvus 2.4", host: "srv-kbd-01",
+      state: "ok", nodes: 3, hitRate: 88, desc: "代码/文档索引 · 嵌入检索（3 节点）" },
+    { id: "st-audit", kind: "state", name: "审计存证库", ver: "WORM v3", host: "srv-aud-01",
+      state: "ok", nodes: 3, cap: "48 TB", desc: "操作留痕与合规归档 · WORM 不可篡改（3 节点）" },
   ],
 
   models: [
@@ -191,11 +327,11 @@ const AXON_DATA = {
   agents: [
     { id: "ag-cs", name: "智能客服 Agent", ver: "v2.4.1", owner: "客服业务部 · 李文", tenant: "customer-svc",
       state: "running", inst: 4, uptime99: "99.6%",
-      runtime: "rt-langgraph", models: ["ep-glm"], tools: ["tl-ticket", "tl-kb"], stores: ["st-mem"],
+      runtime: "rt-langgraph", models: ["ep-glm"], tools: ["tl-ticket", "tl-kb"], stores: ["st-mem", "st-kb-biz"],
       caps: { observe: 1, traffic: 1, instance: 1, state: 1, task: 1 } },
     { id: "ag-coder", name: "代码助手 Agent", ver: "v1.8.0", owner: "研发效能 · 陈曦", tenant: "dev-tools",
       state: "running", inst: 6, uptime99: "99.2%",
-      runtime: "sb-e2b", models: ["ep-glm", "ep-ds"], tools: ["tl-git", "tl-ci", "tl-web"], stores: [],
+      runtime: "sb-e2b", models: ["ep-glm", "ep-ds"], tools: ["tl-git", "tl-ci", "tl-web"], stores: ["st-kb-dev"],
       caps: { observe: 1, traffic: 1, instance: 1, state: 1, task: 1 } },
     { id: "ag-ops", name: "运维巡检 Agent", ver: "v3.0.2", owner: "平台工程 · 赵航", tenant: "platform",
       state: "running", inst: 2, uptime99: "99.8%",
@@ -203,11 +339,11 @@ const AXON_DATA = {
       caps: { observe: 1, traffic: 1, instance: 1, state: 0, task: 1 } },
     { id: "ag-bi", name: "经营分析 Agent", ver: "v2.1.3", owner: "数据经营 · 孙萌", tenant: "data-biz",
       state: "running", inst: 2, uptime99: "98.9%",
-      runtime: "rt-langgraph", models: ["ep-glm"], tools: ["tl-kb"], stores: ["st-mem"],
+      runtime: "rt-langgraph", models: ["ep-glm"], tools: ["tl-kb"], stores: ["st-mem", "st-kb-biz"],
       caps: { observe: 1, traffic: 1, instance: 0, state: 1, task: 1 } },
     { id: "ag-risk", name: "风控审核 Agent", ver: "v1.2.0", owner: "安全风控 · 周麟", tenant: "sec",
       state: "running", inst: 3, uptime99: "99.5%",
-      runtime: "rt-langgraph", models: ["ep-glm"], tools: ["tl-ticket", "tl-erp"], stores: [],
+      runtime: "rt-langgraph", models: ["ep-glm"], tools: ["tl-ticket", "tl-erp"], stores: ["st-audit"],
       caps: { observe: 1, traffic: 1, instance: 1, state: 0, task: 1 } },
     { id: "ag-dm", name: "数据治理 Agent", ver: "v0.9.0-rc", owner: "数据经营 · 孙萌", tenant: "data-biz",
       state: "gray", inst: 1, uptime99: "—",
@@ -274,8 +410,8 @@ const AXON_DATA = {
 
   /* KPI 初始值（tick 引擎会微调部分数值） */
   kpi: {
-    agents: 6, infraSvc: 9, liveTasks: 9, sandboxes: 25,
-    token24h: 4.83, costPerTask: 0.42, coverage: 96.4, successRate: 94.2,
+    agents: 6, infraSvc: 13, liveTasks: 9, sandboxes: 25,
+    token24h: 4.83, costPerTask: 0.42, coverage: 97.6, successRate: 94.2,
   },
 
   charts: {
@@ -305,6 +441,10 @@ const AXON_DATA = {
     { ts: "09:30", tag: "准入", cls: "info", msg: "<b>T26-0741</b> 因沙箱并发配额进入排队，预估等待 8 分钟" },
   ],
 };
+
+/* 执行节点扩容（延迟到对象构造完成后，避免 TDZ）*/
+AXON_DATA.__expandServers();
+delete AXON_DATA.__expandServers;
 
 /* ── 派生：图节点与边 ─────────────────────────────────────── */
 AXON_DATA.buildGraph = function () {

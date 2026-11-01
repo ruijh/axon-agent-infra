@@ -173,7 +173,7 @@ function renderLayerHealth() {
   const D = AXON_DATA;
   const rows = [
     { name: "服务器与系统", color: LAYER_META[0].color, count: D.servers.length,
-      sub: `${D.servers.filter(s => s.state === "ok").length} 正常 · 1 预警`, warn: true, view: "assets", tab: "infra" },
+      sub: `${D.servers.filter(s => s.state === "ok").length} 正常 · ${D.servers.filter(s => s.state !== "ok").length} 预警`, warn: D.servers.some(s => s.state !== "ok"), view: "assets", tab: "infra" },
     { name: "Agent Infra", color: LAYER_META[1].color, count: D.infra.length + D.models.length + D.tools.length,
       sub: `${D.infra.length} 服务 · ${D.models.length} 端点 · ${D.tools.length} 工具`, view: "assets", tab: "infra" },
     { name: "Agent", color: LAYER_META[3].color, count: D.agents.length,
@@ -315,7 +315,7 @@ function renderRacks() {
   const D = AXON_DATA;
   $("#servers-rack-wrap").innerHTML = `
     <div class="panel">
-      <div class="dc-breadcrumb">机房拓扑：<b>华东-1 · A 栋</b> — A2 机房 — 03 列（R01 网络柜 · R04 · R05）· 双路 PDU 供电 · 冷热通道封闭</div>
+      <div class="dc-breadcrumb">机房拓扑：<b>华东-1 · A 栋</b> — A2 机房 — 03 列 A 排（R01 网络 · R02/R03 知识库 · R04 GPU · R05 通用/存储 · R06 审计存证）· 双路 PDU 供电 · 冷热通道封闭</div>
       <div class="rack-grid">${D.racks.map(rackColumnHtml).join("")}</div>
       <div class="rack-note">
         图例：<i style="background:var(--l-server)"></i>服务器
@@ -432,7 +432,7 @@ function renderFloor() {
   renderFloorDetail(sel);
   $$("#fp-svg .fp-rack").forEach(g => g.addEventListener("click", () => {
     const rid = g.dataset.rack;
-    if (!managed.has(rid)) { AXON.toast("机柜未纳管", `${rid} 不在当前管理范围（示例：仅纳管 03 列 A 排的 R01 / R04 / R05）`, "warn", 3600); return; }
+    if (!managed.has(rid)) { AXON.toast("机柜未纳管", `${rid} 不在当前管理范围（示例：纳管 03 列 A 排 R01–R06，B 排预留扩容）`, "warn", 3600); return; }
     renderFloorDetail(rid);
   }));
 }

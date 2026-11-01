@@ -9,6 +9,9 @@ import { dirname, join } from "node:path";
 import { seedWorld } from "./model.mjs";
 import { nowIso } from "./util.mjs";
 
+/** 世界模型版本：目录结构变化时递增，触发重建（保留密钥） */
+const SEED_VERSION = "0.95.2";
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta        (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS api_keys    (id TEXT PRIMARY KEY, name TEXT, role TEXT, hash TEXT,
@@ -141,9 +144,14 @@ export class Store {
   nextTaskSeq() { return this._taskSeq++; }
   nextOpSeq() { return this._opSeq++; }
 
-  /* ── 首次启动播种 ── */
+  /* ── 播种与版本迁移 ──
+     世界模型（目录/任务/沙箱/事件/操作）随 SEED_VERSION 变化整体重建，
+     但保留 api_keys 与幂等记录 —— 密钥不因模型升级失效。 */
   seedIfEmpty() {
-    if (this.getMeta("seeded")) return false;
+    if (this.getMeta("seedVersion") === SEED_VERSION) return false;
+    for (const t of ["objects", "agents", "tasks", "sandboxes", "ops", "events"]) {
+      this.db.prepare(`DELETE FROM ${t}`).run();
+    }
     const w = seedWorld();
     w.servers.forEach(x => this.putObject("server", x));
     w.racks.forEach(x => this.putObject("rack", x));
@@ -159,6 +167,7 @@ export class Store {
     w.sandboxes.forEach(x => this.putSandbox(x));
     w.events.forEach(e => this.pushEvent(e));
     this.setMeta("seeded", nowIso());
+    this.setMeta("seedVersion", SEED_VERSION);
     this.setMeta("version", "0.95.0");
     return true;
   }

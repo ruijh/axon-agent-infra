@@ -120,10 +120,11 @@ $$(".rail-btn").forEach(b => b.addEventListener("click", () => AXON.nav(b.datase
 /* ── 启动序列 ────────────────────────────────────────────── */
 (function boot() {
   const log = $("#boot-log"), fill = $("#boot-fill");
+  const g0 = AXON_DATA.buildGraph();
   const lines = [
     "建立控制面连接 <span class='ok'>OK</span>",
-    "加载对象目录 · 12 类 / 33 个对象 <span class='ok'>OK</span>",
-    "解析依赖关系 · 41 条边 <span class='ok'>OK</span>",
+    `加载对象目录 · 12 类 / ${g0.nodes.length} 个对象 <span class='ok'>OK</span>`,
+    `解析依赖关系 · ${g0.edges.length} 条边 <span class='ok'>OK</span>`,
     "接入遥测流 · 指标 / 追踪 / 事件 <span class='ok'>OK</span>",
     "同步策略与配额状态 <span class='ok'>OK</span>",
     "数据源：内置模拟引擎 · 非真实采集",
