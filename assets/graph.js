@@ -12,6 +12,7 @@
   const nodes = new Map(G.nodes.map(n => [n.id, n]));
   const edges = G.edges;
   let W = 0, H = 0, dpr = 1;
+  let zoom = 1, panX = 0, panY = 0;   /* 视图缩放 / 平移（窄屏密集时的兜底导航） */
   let hoverId = null, selId = null;
   let impactMode = false, impactSet = null, impactRoot = null;
   let particles = [];
@@ -24,22 +25,86 @@
   };
   const layerColor = (n) => LAYER_META[n.layer].color;
 
-  /* ── 布局 ──────────────────────────────────────────────── */
+  /* ── 布局：按层自适应子车道 ──────────────────────────────
+     密集层（如 18 台服务器）自动拆成并排车道，车道数参与带宽加权分配，
+     保证节点间垂直间隙 ≥ GAP_V、相邻车道不重叠；稀疏层槽高设上限避免过散 */
+  const GAP_V = 16, GAP_H = 22;
+  const colTitleX = [0, 0, 0, 0, 0];
+
   function layout() {
     const cols = [[], [], [], [], []];
-    G.nodes.forEach(n => cols[n.layer].push(n));
-    const padX = 70, padY = 56;
-    const colW = (W - padX * 2) / 4;
-    cols.forEach((col, ci) => {
+    G.nodes.forEach(n => {
+      if (n.w0 == null) { n.w0 = n.w; n.h0 = n.h; }   /* 原始尺寸：容量计算一律用它，避免收缩正反馈 */
+      cols[n.layer].push(n);
+    });
+    const padX = 36, padY = 52;
+    const availW = W - padX * 2, availH = H - padY * 2;
+    if (availW <= 0 || availH <= 0) return;
+
+    /* ① 每层需要的车道数：由垂直容量决定（每车道能放下几个节点） */
+    const laneNeed = cols.map(col => {
       col.sort((a, b) => (a.ref && a.ref.id > b.ref.id ? 1 : -1));
-      const availH = H - padY * 2;
+      if (!col.length) return 0;
+      const maxH = Math.max(...col.map(n => n.h0));
+      const perLane = Math.max(1, Math.floor((availH + GAP_V) / (maxH + GAP_V)));
+      return Math.max(1, Math.min(3, Math.ceil(col.length / perLane)));
+    });
+
+    /* ② 层带宽 = 车道数 × 单位宽度（加权，密集层更宽） */
+    const totalWt = laneNeed.reduce((a, b) => a + b, 0) || 1;
+    const unitW = availW / totalWt;
+
+    /* ③ 首轮：确定每层有效车道数。窄画布下（单位带宽被摊薄）允许
+       "紧凑模式"：适度压缩节点高度换取更少车道/更宽芯片 ——
+       垂直不重叠是硬约束，宽度可读优先于行距 */
+    const lanesEff = cols.map((col, ci) => {
+      if (!col.length) return 0;
+      const maxH = Math.max(...col.map(n => n.h0));
+      const perCompact = Math.max(1, Math.floor(availH / (maxH * 0.8)));
+      const lanesCompact = Math.max(1, Math.min(4, Math.ceil(col.length / perCompact)));
+      return Math.max(lanesCompact, Math.min(laneNeed[ci], Math.floor(unitW * laneNeed[ci] / 95)));
+    });
+
+    /* ④ 二轮：按有效车道数重新分配带宽（紧凑层让出的宽度均摊给全部层），排布 */
+    const unitE = availW / (lanesEff.reduce((a, b) => a + b, 0) || 1);
+    let bandX = padX;
+    cols.forEach((col, ci) => {
+      if (!col.length) return;
+      const lanes = lanesEff[ci];
+      const bandW = unitE * lanes;
+      colTitleX[ci] = bandX + bandW / 2;
+      const maxH = Math.max(...col.map(n => n.h0));
+      const maxW = Math.max(...col.map(n => n.w0));
+      const laneW = Math.min(bandW / lanes, maxW + GAP_H * 3);
+      const per = Math.ceil(col.length / lanes);
+
+      /* 空间不足时先等比收紧节点尺寸（文字可能略挤，优于重叠） */
+      col.forEach(n => {
+        n.w = n.w0;
+        n.h = n.h0;
+      });
+      if (laneW < maxW + GAP_H) {
+        const sw = Math.max(62, laneW - 6);
+        col.forEach(n => { n.w = Math.min(n.w, sw); });
+      }
+      const slotH0 = availH / per;
+      if (slotH0 < maxH + 4) {
+        const sh = Math.max(24, slotH0 - 5);
+        col.forEach(n => { n.h = Math.min(n.h, sh); });
+      }
+
+      const slotH = Math.min(slotH0, maxH + 68);
+      const stackH = slotH * per;
+      const y0 = padY + (availH - stackH) / 2;
       col.forEach((n, i) => {
-        const y = col.length === 1 ? H / 2 : padY + availH * (i / (col.length - 1)) + availH / col.length / 2;
-        n.bx = padX + colW * ci + (ci === 0 ? 0 : (ci === 2 ? 26 : 0));
-        n.by = y;
+        const lane = Math.floor(i / per);
+        const li = i % per;
+        n.bx = bandX + bandW / 2 + (lane - (lanes - 1) / 2) * laneW;
+        n.by = y0 + slotH * (li + 0.5);
         if (n.dx == null) { n.dx = 0; n.dy = 0; }
         n.phase = (i * 1.7 + ci * 0.9) % (Math.PI * 2);
       });
+      bandX += bandW;
     });
   }
 
@@ -109,16 +174,21 @@
       impactSet = null; impactRoot = null;
       $("#topo-impact-bar").hidden = true;
     }
+    AXON.emit("topo-impact", { on: impactMode, rootId: impactRoot, set: impactSet });   // 同步 3D 视图
   }
   AXON.impact = { setImpactMode, refresh: (id) => on && setImpactMode(true, id) };
   $("#btn-impact-mode").addEventListener("click", () => setImpactMode(!impactMode));
   $("#btn-topo-reset").addEventListener("click", () => {
     G.nodes.forEach(n => { n.dx = 0; n.dy = 0; });
+    zoom = 1; panX = 0; panY = 0;
     layout();
-    AXON.toast("视图已重置", "节点布局恢复默认。", "info", 2200);
+    AXON.toast("视图已重置", "节点布局与缩放平移恢复默认。", "info", 2200);
   });
 
-  /* ── 命中检测 ──────────────────────────────────────────── */
+  /* ── 命中检测（虚拟坐标 = (屏幕坐标 - 平移) / 缩放）──────── */
+  const toVirtual = (x, y) => ({ x: (x - panX) / zoom, y: (y - panY) / zoom });
+  let panning = null;
+
   function hitTest(x, y) {
     for (const n of G.nodes) {
       const p = pos(n);
@@ -127,23 +197,35 @@
     return null;
   }
 
-  /* ── 交互 ──────────────────────────────────────────────── */
+  /* ── 交互：节点拖拽 / 空白平移 / 滚轮缩放 ─────────────── */
   canvas.addEventListener("mousemove", (e) => {
     const r = canvas.getBoundingClientRect();
     mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top;
     if (dragId) {
+      const v = toVirtual(mouse.x, mouse.y);
       const n = nodes.get(dragId);
-      n.dx = mouse.x - n.bx; n.dy = mouse.y - n.by;
+      n.dx = v.x - n.bx; n.dy = v.y - n.by;
       dragMoved = true;
       canvas.classList.add("grabbing");
       return;
     }
-    hoverId = hitTest(mouse.x, mouse.y);
+    if (panning) {
+      panX = panning.px + (mouse.x - panning.mx);
+      panY = panning.py + (mouse.y - panning.my);
+      if (Math.hypot(mouse.x - panning.mx, mouse.y - panning.my) > 4) dragMoved = true;
+      canvas.classList.add("grabbing");
+      return;
+    }
+    const v = toVirtual(mouse.x, mouse.y);
+    hoverId = hitTest(v.x, v.y);
     canvas.style.cursor = hoverId ? "pointer" : "grab";
   });
-  canvas.addEventListener("mousedown", (e) => {
-    const id = hitTest(mouse.x, mouse.y);
-    if (id) { dragId = id; dragMoved = false; }
+  canvas.addEventListener("mousedown", () => {
+    const v = toVirtual(mouse.x, mouse.y);
+    const id = hitTest(v.x, v.y);
+    dragMoved = false;
+    if (id) { dragId = id; }
+    else { panning = { mx: mouse.x, my: mouse.y, px: panX, py: panY }; }
   });
   window.addEventListener("mouseup", () => {
     if (dragId && !dragMoved) {
@@ -152,8 +234,18 @@
       else { selId = id; renderSide(id); }
     }
     dragId = null;
+    panning = null;
     canvas.classList.remove("grabbing");
   });
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const r = canvas.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    const z2 = clamp(zoom * Math.exp(-e.deltaY * 0.0012), 0.4, 2.4);
+    panX = mx - (mx - panX) * (z2 / zoom);
+    panY = my - (my - panY) * (z2 / zoom);
+    zoom = z2;
+  }, { passive: false });
   canvas.addEventListener("mouseleave", () => { hoverId = null; });
 
   /* ── 粒子 ──────────────────────────────────────────────── */
@@ -182,7 +274,9 @@
 
   function draw() {
     const focus = impactSet || (selId || hoverId ? related(selId || hoverId) : null);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
+    ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, dpr * panX, dpr * panY);
 
     /* 列标题 */
     ctx.font = '10px Consolas, monospace';
@@ -190,9 +284,8 @@
     for (let ci = 0; ci < 5; ci++) {
       const colNodes = G.nodes.filter(n => n.layer === ci);
       if (!colNodes.length) continue;
-      const x = colNodes[0].bx;
       ctx.fillStyle = CV.rgba("textDim", .55);
-      ctx.fillText("L" + ci + " · " + LAYER_META[ci].name, x, 26);
+      ctx.fillText("L" + ci + " · " + LAYER_META[ci].name, colTitleX[ci], 26);
     }
 
     /* 边 */
@@ -310,7 +403,7 @@
   }
 
   function loop() {
-    if (AXON.view === "topo") draw();
+    if (AXON.view === "topo" && AXON.topoMode !== "3d") draw();
     requestAnimationFrame(loop);
   }
 
@@ -440,6 +533,7 @@
     $("#topo-legend").innerHTML =
       Object.values(LAYER_META).map(l => `<span><i style="background:${l.color}"></i>${l.name}</span>`).join("") +
       `<span class="sep"></span><span class="flow">● 粒子 = 依赖调用方向（任务 → 服务器）</span>` +
+      `<span class="sep"></span><span>空白拖拽平移 · 滚轮缩放 · 拖拽节点微调</span>` +
       `<span class="sep"></span><span style="color:var(--text-dim)">虚线 = 遥测推断关系（区别于显式声明 · 有时效）</span>`;
   }
   renderTopoLegend();
@@ -450,5 +544,27 @@
   resize();
   requestAnimationFrame(loop);
 
-  AXON.graph = { computeImpact, nodes, edges, select: (id) => { selId = id; renderSide(id); } };
+  /* 2D / 3D 视图切换（3D 由 assets/topo3d.js 渲染，本模块只管开关与 2D） */
+  const MODE_KEY = "axon-topo-mode";
+  function setTopoMode(m) {
+    AXON.topoMode = m;
+    try { localStorage.setItem(MODE_KEY, m); } catch (e) { /* 隐私模式 */ }
+    const c2d = $("#topo-canvas"), c3d = $("#topo3d-canvas");
+    if (c2d) c2d.hidden = m === "3d";
+    if (c3d) c3d.hidden = m !== "3d";
+    $$("#topo-mode-tabs .subtab").forEach(b => b.classList.toggle("active", b.dataset.mode === m));
+    if (m === "2d") { resize(); }
+    AXON.emit("topo-mode", m);
+  }
+  AXON.setTopoMode = setTopoMode;
+  let savedMode = "3d";
+  try { savedMode = localStorage.getItem(MODE_KEY) || "3d"; } catch (e) { /* 忽略 */ }
+  setTopoMode(savedMode === "2d" ? "2d" : "3d");
+  const modeTabs = $("#topo-mode-tabs");
+  if (modeTabs) modeTabs.addEventListener("click", (e) => {
+    const b = e.target.closest(".subtab");
+    if (b) setTopoMode(b.dataset.mode);
+  });
+
+  AXON.graph = { computeImpact, nodes, edges, select: (id) => { selId = id; renderSide(id); }, viewState: () => ({ zoom, panX, panY }) };
 })();
