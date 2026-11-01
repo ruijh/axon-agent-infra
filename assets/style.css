@@ -1084,3 +1084,13 @@ button:focus-visible, .input:focus-visible, .chip:focus-visible {
   .live-grid .panel:nth-child(1), .live-grid .panel:nth-child(2),
   .live-grid .panel:nth-child(4), .live-grid .panel:nth-child(5) { grid-column: span 12; }
 }
+
+/* ═══ 编排中心：场景选择芯片 ═════════════════════════════ */
+.maint-scenarios { display: flex; gap: 8px; flex-wrap: wrap; padding: 2px 0 12px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+.msc-chip { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px; border-radius: 6px; cursor: pointer;
+  background: rgba(20, 34, 66, 0.5); border: 1px solid var(--line); color: var(--text-dim); font-size: 12.5px;
+  transition: all .18s ease; }
+.msc-chip:hover { border-color: var(--line-strong); color: var(--text); }
+.msc-chip.active { border-color: rgba(55, 226, 255, 0.55); color: var(--text); background: rgba(55, 226, 255, 0.08); box-shadow: 0 0 12px rgba(55, 226, 255, 0.12) inset; }
+.msc-chip .msc-code { font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 3px;
+  background: rgba(96, 190, 255, 0.12); color: var(--cyan); border: 1px solid rgba(55, 226, 255, 0.3); }

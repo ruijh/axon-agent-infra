@@ -177,7 +177,7 @@ function renderLayerHealth() {
     { name: "Agent Infra", color: LAYER_META[1].color, count: D.infra.length + D.models.length + D.tools.length,
       sub: `${D.infra.length} 服务 · ${D.models.length} 端点 · ${D.tools.length} 工具`, view: "assets", tab: "infra" },
     { name: "Agent", color: LAYER_META[3].color, count: D.agents.length,
-      sub: `${D.agents.reduce((a, x) => a + x.inst, 0)} 实例 · 1 灰度中`, view: "assets", tab: "agents" },
+      sub: `${D.agents.reduce((a, x) => a + x.inst, 0)} 实例 · ${D.agents.filter(a => a.state === "gray").length} 灰度中 · ${D.agents.filter(a => a.state === "retired").length} 已退役`, view: "assets", tab: "agents" },
     { name: "任务与会话", color: LAYER_META[4].color, count: D.kpi.liveTasks,
       sub: "2 等待审批 · 1 待核对", warn: true, view: "tasks", tab: null },
   ];
@@ -826,7 +826,7 @@ function renderAssets() {
           <div class="ac-icon">${esc(a.name.slice(0, 2))}</div>
           <div><div class="ac-name">${esc(a.name)}</div>
             <div class="ac-meta">${esc(a.ver)} · ${esc(a.owner)}</div></div>
-          <span class="ac-status badge ${a.state === "gray" ? "warn" : "ok"}">${a.state === "gray" ? "灰度中" : "运行中"}</span>
+          <span class="ac-status badge ${a.state === "retired" ? "dim" : a.state === "gray" ? "warn" : "ok"}">${a.state === "retired" ? "已退役" : a.state === "gray" ? "灰度中" : "运行中"}</span>
         </div>
         <div class="ac-rows">
           <div class="ac-row"><b>租户</b><span>${esc(t.name || a.tenant)} · ${a.inst} 实例 · ${a.uptime99}</span></div>

@@ -48,7 +48,7 @@
       <button class="rail-btn" data-view="topo"><i class="ri"></i><span>拓扑依赖</span></button>
       <button class="rail-btn" data-view="assets"><i class="ri"></i><span>资产目录</span></button>
       <button class="rail-btn" data-view="tasks"><i class="ri"></i><span>任务中心</span></button>
-      <button class="rail-btn" data-view="maint"><i class="ri"></i><span>维护编排</span></button>
+      <button class="rail-btn" data-view="maint"><i class="ri"></i><span>编排中心</span></button>
       <button class="rail-btn" data-view="gov"><i class="ri"></i><span>治理配额</span></button>
       <button class="rail-btn" data-view="live"><i class="ri"></i><span>接入面 · Live</span></button>
       <div class="rail-foot">
@@ -238,13 +238,14 @@
         </div>
       </section>
 
-      <!-- ═══ 维护编排 ═══ -->
+      <!-- ═══ 编排中心（任务感知 × Agent Infra 场景族）═══ -->
       <section class="view" id="view-maint">
         <div class="view-head">
-          <h1>任务感知维护编排</h1>
-          <p class="view-sub">影响分析 → 前置检查 → 准入限制 → 任务排空 → 执行维护 → 验证恢复（场景 S06）</p>
+          <h1>任务感知编排中心</h1>
+          <p class="view-sub">七段式公共操作流程（§8.3）：影响分析 → 前置检查 → 准入限制 → 任务排空 → 执行 → 验证归档 · 五类 Agent Infra 场景</p>
         </div>
         <div class="maint-card panel">
+          <div class="maint-scenarios" id="maint-scenarios"></div>
           <div class="maint-stepper" id="maint-stepper"></div>
           <div class="maint-stage" id="maint-stage"></div>
           <div class="maint-ctrl" id="maint-ctrl"></div>
