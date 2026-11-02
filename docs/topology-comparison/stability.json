@@ -1,0 +1,40 @@
+{
+  "idleStart": {
+    "frames": 15,
+    "textures": 1,
+    "geometries": 5,
+    "programs": 4,
+    "nodes": 52,
+    "edges": 59,
+    "labels": 52,
+    "scope": "all"
+  },
+  "idleEnd": {
+    "frames": 15,
+    "textures": 1,
+    "geometries": 5,
+    "programs": 4,
+    "nodes": 52,
+    "edges": 59,
+    "labels": 52,
+    "scope": "all"
+  },
+  "verifiedCycles": 8,
+  "themeChanges": 16,
+  "scopeChanges": 24,
+  "modeChanges": 16,
+  "hiddenViewFrames": [
+    50,
+    50
+  ],
+  "after": {
+    "frames": 697,
+    "textures": 1,
+    "geometries": 5,
+    "programs": 4,
+    "nodes": 52,
+    "edges": 59,
+    "labels": 52,
+    "scope": "all"
+  }
+}

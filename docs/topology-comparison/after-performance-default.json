@@ -1,0 +1,87 @@
+{
+  "status": "complete",
+  "canvas": [
+    830,
+    484
+  ],
+  "pixelRatio": 1,
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+  "metrics": [
+    {
+      "scenario": "overview",
+      "canvas": [
+        1142,
+        484
+      ],
+      "samples": 180,
+      "cpuMs": {
+        "p50": 0.9,
+        "p95": 1.4
+      },
+      "frameIntervalMs": {
+        "p50": 16.7,
+        "p95": 16.8
+      },
+      "calls": 5,
+      "triangles": 1038,
+      "nodes": 52,
+      "edges": 59,
+      "labels": 52,
+      "scope": "all"
+    },
+    {
+      "scenario": "agent",
+      "canvas": [
+        830,
+        484
+      ],
+      "samples": 180,
+      "cpuMs": {
+        "p50": 0.6,
+        "p95": 1.1
+      },
+      "frameIntervalMs": {
+        "p50": 16.7,
+        "p95": 16.8
+      },
+      "calls": 4,
+      "triangles": 336,
+      "nodes": 15,
+      "edges": 16,
+      "labels": 15,
+      "scope": "dependencies"
+    },
+    {
+      "scenario": "impact",
+      "canvas": [
+        830,
+        484
+      ],
+      "samples": 180,
+      "cpuMs": {
+        "p50": 0.7,
+        "p95": 1.2
+      },
+      "frameIntervalMs": {
+        "p50": 16.7,
+        "p95": 16.8
+      },
+      "calls": 6,
+      "triangles": 618,
+      "nodes": 27,
+      "edges": 39,
+      "labels": 27,
+      "scope": "impact"
+    }
+  ],
+  "resources": {
+    "frames": 632,
+    "textures": 1,
+    "geometries": 6,
+    "programs": 4,
+    "nodes": 27,
+    "edges": 39,
+    "labels": 27,
+    "scope": "impact"
+  }
+}

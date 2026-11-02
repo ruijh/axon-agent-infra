@@ -558,7 +558,48 @@ body::after {
 }
 
 /* ══ 拓扑 ════════════════════════════════════════════════ */
-.topo-wrap { display: grid; grid-template-columns: 1fr 300px; gap: 12px; height: calc(100% - 66px); }
+.topo-wrap { display: grid; grid-template-columns: minmax(0,1fr); gap: 12px; height: calc(100% - 112px); min-height: 380px; }
+.topo-wrap.has-selection { grid-template-columns: minmax(0,1fr) 300px; }
+.topo-workbench { display:flex; align-items:center; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+.topo-workbench label { display:flex; align-items:center; gap:4px; color:var(--text-dim); font-size:11px; cursor:pointer; }
+.topo-search { position:relative; flex:1; min-width:190px; max-width:290px; z-index:25; }
+.topo-search input { width:100%; padding:7px 10px; border:1px solid var(--line-strong); border-radius:4px; background:var(--input-bg); color:var(--text); font:12px var(--sans); }
+#topo-search-results { position:absolute; top:35px; left:0; width:340px; max-height:300px; overflow:auto; padding:5px; background:var(--panel-solid); border:1px solid var(--line-strong); box-shadow:0 12px 32px #0005; }
+#topo-search-results button { display:block; width:100%; text-align:left; padding:8px; border:0; background:transparent; color:var(--text); cursor:pointer; }
+#topo-search-results button:hover,#topo-search-results button:focus-visible { background:var(--bg2); }
+#topo-search-results small { display:block; color:var(--text-dim); margin-top:3px; }
+.topo-labels { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+.topo-node-label { position:absolute; top:0; left:0; height:32px; padding:1px 7px; border:1px solid var(--line-strong); border-left:3px solid var(--node-color); border-radius:3px; background:var(--node-bg); color:var(--text-bright); cursor:pointer; text-align:left; pointer-events:auto; box-shadow:0 2px 5px #0002; }
+.topo-node-label span { display:block; font:500 13px/17px var(--sans); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.topo-node-label small { display:block; font:10px/12px var(--mono); color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.topo-node-label:hover,.topo-node-label.selected { border-color:var(--node-color); outline:1px solid var(--node-color); z-index:2; background:var(--panel-solid); }
+.topo-node-label.potential { border-style:dashed; }
+.topo-node-label.impact-root { box-shadow:0 0 0 3px rgba(var(--rgb-crit),.16); }
+.topo-layer-label { position:absolute; top:43px; transform:translateX(-50%); font:11px var(--sans); letter-spacing:.03em; color:var(--text-dim); white-space:nowrap; }
+.topo-scope { position:absolute; top:12px; left:16px; right:16px; color:var(--text); font:12px var(--sans); pointer-events:none; }
+.topo-scope[data-mode=impact] { color:var(--warn); }
+.topo-label-hint { position:absolute; left:16px; bottom:46px; color:var(--text-dim); font-size:10px; pointer-events:none; }
+.topo-close { float:right; position:sticky; top:0; z-index:1; }
+/* Theme notifications must not intercept topology controls beneath them. */
+body:has(#view-topo.active) #toasts,body:has(#view-topo.active) #toasts .toast { pointer-events:none; }
+.analysis-kicker { font:10px var(--mono); color:var(--cyan); padding-top:2px; letter-spacing:.05em; }
+#topo-analysis h3 { font-size:16px; margin:9px 0; font-weight:600; }
+.analysis-note { color:var(--text-dim); font-size:11px; line-height:1.7; margin:8px 0; }
+.analysis-counts { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; border-block:1px solid var(--line); padding:12px 0; }
+.analysis-counts span { font-size:10px; color:var(--text-dim); }
+.analysis-counts b { display:block; font:22px var(--mono); color:var(--text-bright); margin-bottom:4px; }
+.analysis-risk { font-size:11px; line-height:1.8; color:var(--warn); margin:10px 0; }
+.analysis-members summary { cursor:pointer; color:var(--text); font-size:12px; padding:6px 0; }
+.analysis-members { max-height:245px; overflow:auto; }
+.analysis-members button { display:flex; flex-direction:column; gap:3px; width:100%; border:0; border-bottom:1px solid var(--line); text-align:left; padding:7px 3px; background:transparent; color:var(--text); font:12px var(--sans); cursor:pointer; }
+.analysis-members button small { font-size:10px; color:var(--text-dim); }
+.analysis-members button:hover,.analysis-members button[aria-current=true] { background:var(--bg2); color:var(--cyan); }
+.analysis-divider { border-top:1px solid var(--line); margin:15px 0; }
+.topo-path { padding:9px; background:var(--bg1); margin:10px 0; font-size:11px; line-height:1.6; }
+.topo-path h4 { margin-bottom:6px; color:var(--text-dim); font-weight:400; }
+.topo-path button { background:none; color:var(--text); border:0; font-size:11px; cursor:pointer; }
+.path-arrow { display:inline-block; color:var(--warn); padding:0 5px; }
+.topo-workbench :focus-visible,.topo-node-label:focus-visible,.topo-side button:focus-visible { outline:2px solid var(--cyan); outline-offset:3px; }
 .topo-canvas-wrap {
   position: relative;
   border: 1px solid var(--line); border-radius: var(--radius);
@@ -582,6 +623,7 @@ body::after {
   background: var(--pop-bg); border: 1px solid var(--line);
   border-radius: var(--radius-sm); padding: 6px 12px;
   backdrop-filter: blur(4px);
+  flex-wrap:wrap; gap:8px 14px; right:12px; font-size:10px;
 }
 .topo-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 .topo-legend .sep { width: 1px; height: 12px; background: var(--line); }
@@ -1121,9 +1163,15 @@ body::after {
 }
 @media (max-width: 1150px) {
   .topo-wrap { grid-template-columns: 1fr; }
-  .topo-side { max-height: 260px; }
+  .topo-wrap.has-selection { grid-template-columns:minmax(0,1fr) 270px; }
   .quick-grid { grid-template-columns: 1fr; }
   .mt-summary { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 900px) {
+  #view-topo .topo-wrap { position:relative; grid-template-columns: minmax(0,1fr); height:calc(100% - 150px); }
+  #topo-inspector { position:absolute; right:0; top:0; bottom:0; width:280px; z-index:20; background:var(--panel-solid); }
+  .topo-workbench { gap:6px; }
+  .topo-search { max-width:none; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

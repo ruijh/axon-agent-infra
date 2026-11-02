@@ -1,3 +1,5 @@
+import { topology } from './topology-state.js';
+import { nodeTitle } from './topology-model.js';
 /* ═══════════════════════════════════════════════════════════
    AXON · 跨层拓扑图（Canvas）
    粒子沿「任务 → Agent → Infra → 服务器」依赖方向流动
@@ -8,9 +10,9 @@
   const canvas = $("#topo-canvas");
   const ctx = canvas.getContext("2d");
   const CV = window.AXON_CV;
-  let G = AXON_DATA.buildGraph();
+  let G = topology.graph;
   const nodes = new Map(G.nodes.map(n => [n.id, n]));
-  const edges = G.edges;
+  let edges = G.edges;
   let W = 0, H = 0, dpr = 1;
   let zoom = 1, panX = 0, panY = 0;   /* 视图缩放 / 平移（窄屏密集时的兜底导航） */
   let hoverId = null, selId = null;
@@ -130,59 +132,26 @@
   };
 
   function computeImpact(rootId) {
-    const set = AXON_DATA.downstream(edges, rootId);
-    const cnt = { infra: 0, agent: 0, task: 0, nonInterrupt: 0, names: [] };
-    set.forEach(id => {
-      const n = nodes.get(id); if (!n) return;
-      if (n.layer <= 2) cnt.infra++;
-      if (n.layer === 3) cnt.agent++;
-      if (n.layer === 4) {
-        cnt.task++;
-        if (n.ref && n.ref.interruptible === false) cnt.nonInterrupt++;
-      }
-    });
-    return { set, cnt };
+    const a=topology.model.analyze(rootId,'impact',topology.state.includeInferred);
+    const set=new Set(a.visible);set.delete(rootId);
+    return {set,cnt:{infra:a.counts.services,agent:a.counts.agents,task:a.counts.tasks,nonInterrupt:a.counts.nonInterrupt}};
   }
-
-  function showImpactBar(rootId) {
-    const { cnt } = computeImpact(rootId);
-    const root = nodes.get(rootId);
-    const bar = $("#topo-impact-bar");
-    bar.hidden = false;
-    bar.innerHTML = `
-      <span>影响分析 · <b>${esc(root ? root.label : rootId)}</b></span>
-      <span>受影响 Infra 服务 <b>${cnt.infra}</b></span>
-      <span>Agent <b>${cnt.agent}</b></span>
-      <span>在途任务 <b>${cnt.task}</b></span>
-      <span>其中不可中断 <b>${cnt.nonInterrupt}</b></span>
-      <button class="btn tiny danger" id="impact-exit">退出</button>`;
-    $("#impact-exit").onclick = () => setImpactMode(false);
+  function setImpactMode(on,rootId) {
+    if(on && rootId)topology.explore(rootId,'impact');
+    else topology.armImpact(on);
   }
-
-  function setImpactMode(on, rootId) {
-    impactMode = on;
-    $("#btn-impact-mode").classList.toggle("active", on);
-    $("#btn-impact-mode").innerHTML = on
-      ? '<i class="dot" style="animation:ledBlink 1s infinite"></i>影响分析中 · 点击节点'
-      : '<i class="dot"></i>影响分析模式';
-    if (on && rootId) {
-      const { set } = computeImpact(rootId);
-      impactSet = set; impactRoot = rootId;
-      showImpactBar(rootId);
-      AXON.toast("影响分析完成", `已标定受影响对象链路，红色脉冲即为故障辐射面。`, "warn");
-    } else if (!on) {
-      impactSet = null; impactRoot = null;
-      $("#topo-impact-bar").hidden = true;
-    }
-    AXON.emit("topo-impact", { on: impactMode, rootId: impactRoot, set: impactSet });   // 同步 3D 视图
-  }
-  AXON.impact = { setImpactMode, refresh: (id) => on && setImpactMode(true, id) };
-  $("#btn-impact-mode").addEventListener("click", () => setImpactMode(!impactMode));
-  $("#btn-topo-reset").addEventListener("click", () => {
-    G.nodes.forEach(n => { n.dx = 0; n.dy = 0; });
-    zoom = 1; panX = 0; panY = 0;
-    layout();
-    AXON.toast("视图已重置", "节点布局与缩放平移恢复默认。", "info", 2200);
+  AXON.impact={setImpactMode,refresh:id=>{if(topology.state.mode==='impact')topology.explore(id,'impact');}};
+  $('#btn-impact-mode').onclick=()=>setImpactMode(!(topology.state.mode==='impact'||topology.state.impactArmed),topology.state.selectedId);
+  $('#btn-topo-reset').onclick=()=>topology.reset();
+  topology.subscribe((state,reason)=>{
+    particles=[];
+    selId=state.selectedId;impactMode=state.impactArmed||state.mode==='impact';
+    const analysis=topology.analysis;
+    impactSet=state.mode==='impact'?analysis?.visible:null;impactRoot=state.mode==='impact'?state.rootId:null;
+    if(reason==='data'){G=topology.graph;nodes.clear();G.nodes.forEach(n=>nodes.set(n.id,n));edges=G.edges;layout();}
+    if(reason==='reset'){G.nodes.forEach(n=>{n.dx=0;n.dy=0;});zoom=1;panX=panY=0;layout();}
+    if(selId)renderSide(selId);else $('#topo-side').innerHTML='';
+    renderTopoLegend();
   });
 
   /* ── 命中检测（虚拟坐标 = (屏幕坐标 - 平移) / 缩放）──────── */
@@ -191,6 +160,7 @@
 
   function hitTest(x, y) {
     for (const n of G.nodes) {
+      if(topology.analysis&&!topology.analysis.visible.has(n.id))continue;
       const p = pos(n);
       if (x >= p.x - n.w / 2 - 3 && x <= p.x + n.w / 2 + 3 && y >= p.y - n.h / 2 - 3 && y <= p.y + n.h / 2 + 3) return n.id;
     }
@@ -230,9 +200,9 @@
   window.addEventListener("mouseup", () => {
     if (dragId && !dragMoved) {
       const id = dragId;
-      if (impactMode) { selId = id; setImpactMode(true, id); renderSide(id); }
-      else { selId = id; renderSide(id); }
+      topology.select(id);
     }
+    if(panning && !dragMoved)topology.clear();
     dragId = null;
     panning = null;
     canvas.classList.remove("grabbing");
@@ -250,8 +220,10 @@
 
   /* ── 粒子 ──────────────────────────────────────────────── */
   function spawnParticles() {
-    const focus = impactSet || (selId ? related(selId) : null);
+    const focus = topology.analysis?.visible || (selId ? related(selId) : null);
     edges.forEach((e, i) => {
+      if(e.inferred&&!topology.state.includeInferred)return;
+      if(topology.analysis&&(!focus.has(e.from)||!focus.has(e.to)))return;
       const lit = !focus || (focus.has(e.from) && focus.has(e.to));
       const rate = lit ? 0.10 : 0.02;
       if (Math.random() < rate) {
@@ -273,7 +245,7 @@
   }
 
   function draw() {
-    const focus = impactSet || (selId || hoverId ? related(selId || hoverId) : null);
+    const focus = topology.analysis?.visible || (selId || hoverId ? related(selId || hoverId) : null);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, dpr * panX, dpr * panY);
@@ -290,6 +262,8 @@
 
     /* 边 */
     edges.forEach(e => {
+      if(e.inferred&&!topology.state.includeInferred)return;
+      if(topology.analysis&&(!focus.has(e.from)||!focus.has(e.to)))return;
       const a = nodes.get(e.from), b = nodes.get(e.to);
       if (!a || !b) return;
       const pa = pos(a), pb = pos(b);
@@ -316,15 +290,19 @@
       ctx.stroke();
       ctx.setLineDash([]);
       e._geom = [p0, p1, p2, { x: p3.x, y: pb.y }];
+      const t=impactSet ? .16 : .84,q=bez(p0,p1,p2,p3,t),q2=bez(p0,p1,p2,p3,t+.01);
+      const angle=Math.atan2(q2.y-q.y,q2.x-q.x)+(impactSet?Math.PI:0);
+      ctx.save();ctx.translate(q.x,q.y);ctx.rotate(angle);ctx.fillStyle=ctx.strokeStyle;
+      ctx.beginPath();ctx.moveTo(4,0);ctx.lineTo(-3,-2.5);ctx.lineTo(-3,2.5);ctx.closePath();ctx.fill();ctx.restore();
     });
 
     /* 粒子 */
-    spawnParticles();
+    if(!REDUCED && $("#topo-motion")?.checked)spawnParticles();else particles=[];
     particles.forEach(p => {
       const g = p.e._geom;
       if (!g) return;
       p.t += p.v;
-      const pt = bez(g[0], g[1], g[2], g[3], ease(clamp(p.t, 0, 1)));
+      const pt = bez(g[0], g[1], g[2], g[3], impactSet?1-ease(clamp(p.t,0,1)):ease(clamp(p.t, 0, 1)));
       const hot = p.hot;
       ctx.fillStyle = hot ? CV.rgba("crit", .95) : CV.rgba("accentSoft", .9);
       ctx.shadowColor = hot ? CV.rgba("crit", .9) : CV.rgba("accent", .8);
@@ -338,6 +316,7 @@
     /* 节点 */
     const pulse = 0.5 + 0.5 * Math.sin((performance.now() - t0) / 300);
     G.nodes.forEach(n => {
+      if(topology.analysis&&!topology.analysis.visible.has(n.id))return;
       const p = pos(n);
       const isFocus = focus ? focus.has(n.id) : true;
       const alpha = focus ? (isFocus ? 1 : 0.16) : 1;
@@ -394,7 +373,7 @@
       ctx.fillStyle = CV.rgba("textBright", .96);
       ctx.font = '11.5px "Segoe UI","Microsoft YaHei",sans-serif';
       const gx = p.x - n.w / 2 + 8;
-      ctx.fillText((GLYPH[n.type] || "◈") + " " + n.label, gx, p.y - 2);
+      ctx.fillText((GLYPH[n.type] || "◈") + " " + nodeTitle(n), gx, p.y - 2);
       ctx.fillStyle = CV.rgba("textDim", .85);
       ctx.font = '9.5px Consolas,monospace';
       ctx.fillText(n.sub || "", gx, p.y + 12);
@@ -403,7 +382,7 @@
   }
 
   function loop() {
-    if (AXON.view === "topo" && AXON.topoMode !== "3d") draw();
+    if (AXON.view === "topo" && AXON.topoMode !== "3d" && !document.hidden) draw();
     requestAnimationFrame(loop);
   }
 
@@ -506,13 +485,13 @@
       const o = AXON_DATA.find(id);
       if (!o) return "";
       const name = (o.name || id).replace(" Agent", "").replace(" · ", " ");
-      return `<span class="dep-chip" data-node="${id}">${esc(name.length > 13 ? name.slice(0, 12) + "…" : name)}</span>`;
+      return `<button class="dep-chip" data-node="${id}">${esc(name.length > 13 ? name.slice(0, 12) + "…" : name)}</button>`;
     }).join("");
   }
 
   function wireSideActions(id) {
     const side = $("#topo-side");
-    $$(".dep-chip", side).forEach(c => c.addEventListener("click", () => { selId = c.dataset.node; renderSide(selId); }));
+    $$(".dep-chip", side).forEach(c => c.addEventListener("click", () => { topology.inspect(c.dataset.node); }));
     const impactBtn = $("#side-impact", side);
     if (impactBtn) impactBtn.addEventListener("click", () => setImpactMode(true, id));
     const maintBtn = $("#side-maint", side);
@@ -530,11 +509,7 @@
 
   /* 图例（主题切换时随 LAYER_META 重建） */
   function renderTopoLegend() {
-    $("#topo-legend").innerHTML =
-      Object.values(LAYER_META).map(l => `<span><i style="background:${l.color}"></i>${l.name}</span>`).join("") +
-      `<span class="sep"></span><span class="flow">● 粒子 = 依赖调用方向（任务 → 服务器）</span>` +
-      `<span class="sep"></span><span>空白拖拽平移 · 滚轮缩放 · 拖拽节点微调</span>` +
-      `<span class="sep"></span><span style="color:var(--text-dim)">虚线 = 遥测推断关系（区别于显式声明 · 有时效）</span>`;
+    $('#topo-legend').innerHTML = `<span>${topology.state.mode==='impact'?'箭头：故障源 → 受影响对象':'箭头：使用方 → 依赖资源'}</span><span>虚线：推断关系</span><span>${AXON.topoMode==='2d'?'拖拽节点 / 空白平移':'拖拽环绕 · 右键平移'} · 滚轮缩放 · Esc 清除</span>`;
   }
   renderTopoLegend();
   AXON.on("theme", renderTopoLegend);
@@ -554,6 +529,7 @@
     if (c3d) c3d.hidden = m !== "3d";
     $$("#topo-mode-tabs .subtab").forEach(b => b.classList.toggle("active", b.dataset.mode === m));
     if (m === "2d") { resize(); }
+    renderTopoLegend();
     AXON.emit("topo-mode", m);
   }
   AXON.setTopoMode = setTopoMode;
@@ -566,5 +542,5 @@
     if (b) setTopoMode(b.dataset.mode);
   });
 
-  AXON.graph = { computeImpact, nodes, edges, select: (id) => { selId = id; renderSide(id); }, viewState: () => ({ zoom, panX, panY }) };
+  AXON.graph = { computeImpact, nodes, get edges(){return edges;}, select: (id) => topology.select(id), viewState: () => ({ zoom, panX, panY }) };
 })();

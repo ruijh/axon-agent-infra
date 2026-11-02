@@ -31,5 +31,10 @@
   "assets/vendor/addons/shaders/LuminosityHighPassShader.js",
   "assets/vendor/addons/shaders/OutputShader.js",
   "assets/vendor/addons/utils/BufferGeometryUtils.js",
-  "assets/vendor/addons/utils/SkeletonUtils.js"
+  "assets/vendor/addons/utils/SkeletonUtils.js",
+  "assets/topology-model.js",
+  "assets/topology-camera.js",
+  "assets/topology-state.js",
+  "assets/topology-ui.js",
+  "assets/topology-benchmark.js"
 ]

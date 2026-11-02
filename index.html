@@ -199,15 +199,27 @@
             <button class="btn ghost" id="btn-topo-reset">重置视图</button>
           </div>
         </div>
+        <div class="topo-workbench">
+          <div class="topo-search"><input id="topo-search" type="search" aria-label="搜索拓扑对象" placeholder="搜索名称、ID 或资产编号" autocomplete="off" aria-controls="topo-search-results"><div id="topo-search-results" hidden></div></div>
+          <button class="btn tiny" id="topo-overview">全图</button>
+          <button class="btn tiny" id="topo-dependencies" disabled>完整依赖</button>
+          <button class="btn tiny" id="topo-agent-sample">Agent 链路样板</button>
+          <button class="btn tiny" id="topo-impact-sample">服务器故障样板</button>
+          <label><input type="checkbox" id="topo-inferred" checked> 包含推断关系</label>
+          <label><input type="checkbox" id="topo-motion"> 方向演示</label>
+        </div>
         <div class="topo-wrap">
           <div class="topo-canvas-wrap">
             <canvas id="topo-canvas" hidden></canvas>
             <canvas id="topo3d-canvas"></canvas>
+            <div id="topo-labels" class="topo-labels"></div>
+            <div id="topo-scope" class="topo-scope" aria-live="polite"></div>
+            <div id="topo-label-hint" class="topo-label-hint"></div>
             <div class="topo-legend" id="topo-legend"></div>
             <div class="topo-impact-bar" id="topo-impact-bar" hidden></div>
           </div>
-          <aside class="topo-side" id="topo-side">
-            <div class="side-empty">点击图中节点查看对象详情<br><span>支持服务器 / Infra 服务 / 模型端点 / 工具 / Agent / 任务</span></div>
+          <aside class="topo-side" id="topo-inspector" hidden><button class="btn tiny topo-close" id="topo-close" aria-label="关闭拓扑详情">✕</button><div id="topo-analysis"></div><div id="topo-side">
+            <div class="side-empty">点击图中节点查看对象详情<br><span>支持服务器 / Infra 服务 / 模型端点 / 工具 / Agent / 任务</span></div></div>
           </aside>
         </div>
       </section>
@@ -375,10 +387,11 @@
 <script src="assets/data.js"></script>
 <script src="assets/core.js"></script>
 <script src="assets/themes.js"></script>
-<script src="assets/graph.js"></script>
+<script type="module" src="assets/graph.js"></script>
 <script src="assets/views.js"></script>
 <script src="assets/net.js"></script>
 <script type="module" src="assets/dc3d.js"></script>
+<script type="module" src="assets/topology-ui.js"></script>
 <script type="module" src="assets/topo3d.js"></script>
 <script src="assets/flow.js"></script>
 <script src="assets/livesim.js"></script>
