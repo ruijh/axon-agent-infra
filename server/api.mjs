@@ -134,7 +134,7 @@ export function createApi(ctx) {
         requiresApproval: !!b.requiresApproval, tokensM: 0, costCny: 0,
         createdAt: new Date().toISOString(), createdBy: c.key.name,
       };
-      c.store.putTask(task);
+      c.store.createTask(task);
       emitTaskEvent(c, task, `创建（${task.name} · ${agent.id} · 租户 ${task.tenant}）`);
       json(c.res, 201, task);
     }],
@@ -388,10 +388,9 @@ export function createApi(ctx) {
   return async function handle(req, res, pathname, query, body) {
     for (const [method, pattern, perm, handler] of routes) {
       if (method !== req.method) continue;
-      const match = matchPath(pattern, pathname);
-      if (!match) continue;
-
       try {
+        const match = matchPath(pattern, pathname);
+        if (!match) continue;
         // 鉴权：perm 为空 = 豁免（meta / setup / openapi / docs）
         if (perm.length) {
           if (!req.headers["authorization"] && query.get("key")) {
@@ -465,7 +464,10 @@ function matchPath(pattern, pathname) {
   if (pp.length !== ap.length) return null;
   const params = {};
   for (let i = 0; i < pp.length; i++) {
-    if (pp[i].startsWith(":")) params[pp[i].slice(1)] = decodeURIComponent(ap[i]);
+    if (pp[i].startsWith(":")) {
+      try { params[pp[i].slice(1)] = decodeURIComponent(ap[i]); }
+      catch { throw new ApiError(400, "BAD_REQUEST", "请求路径编码无效"); }
+    }
     else if (pp[i] !== ap[i]) return null;
   }
   return params;

@@ -192,7 +192,7 @@ export function submitOp(ctx, { action, params = {}, requestedBy }) {
     label: def.label(params), params, requestedBy: requestedBy || "api",
     status: "accepted", evidence: [], limits: [], createdAt: new Date().toISOString(),
   };
-  ctx.store.putOp(op);
+  ctx.store.createOp(op);
 
   setTimeout(() => {
     try {
@@ -228,7 +228,7 @@ export function auditOp(ctx, { action, target, label, requestedBy, expect }) {
     params: {}, requestedBy: requestedBy || "api", status: "executed", evidence: [{ type: "state-machine", ref: target }],
     limits: [], createdAt: new Date().toISOString(), executedAt: new Date().toISOString(),
   };
-  ctx.store.putOp(op);
+  ctx.store.createOp(op);
   setTimeout(() => {
     op.status = expect(ctx.store) ? "verified" : "failed";
     op.verifiedAt = new Date().toISOString();

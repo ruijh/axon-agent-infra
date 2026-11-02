@@ -27,20 +27,32 @@ AXON_API_KEY=<agent密钥> node worker/worker.mjs   # 启动接入演示 Agent�
 
 **方式二（纯静态演示，不带控制平面）：** 直接双击 `index.html`，或
 ```bash
-python _serve.py        # 或 python -m http.server 8437
+python _serve.py        # 仅公开运行时资源，默认绑定 127.0.0.1:8437
 ```
 
 **测试（SPEC 硬约束的可执行验证）：**
 ```bash
 node --test tests/invariants.test.mjs    # 19 项：451 能力门控 / 409 状态机 / 412 维护前置 / 429 配额 / 幂等 / 权重恒等 100 / GC 保护…
+node --test tests/hardening.test.mjs tests/invariants.test.mjs tests/scene-quality.test.mjs  # 全套 40 项；静态 Python 服务回归需要 Python 3
 ```
+
+### 静态资源边界与数据升级
+
+- Node 和 Python 静态服务共用 `server/public-assets.json` 白名单，仅公开首页、脚本、样式、Three.js 模块和 GLB。新增运行时资源必须登记；`data/`、`.git/`、服务端代码和文档不对外提供。白名单资源也不得通过符号链接或目录联接指向其他文件。不要在项目根目录用通用静态服务器替代这两个入口。
+- Node 默认只监听 `127.0.0.1`。确需网络访问时显式传入 `--host <地址>`；`--port 0` 可分配临时端口，启动日志显示实际端口。
+- 非法路径编码、无效 JSON 和非对象请求体返回 400；超过 1 MB 的请求体返回 413，不执行 API 操作。
+- SQLite 表结构使用 `PRAGMA user_version` 管理。v0 → v1 以事务增加持久化编号序列，从历史最大编号之后继续分配；创建任务和操作遇到重复 ID 返回冲突，禁止覆盖历史记录。编号允许空号。
+- `seedVersion` 仅记录首次演示数据版本。已有初始化标记或任何业务记录时不再播种；升级不会清空、覆盖或自动补回演示对象。新对象应通过明确的数据迁移引入。高于当前支持版本的数据库拒绝打开，不自动降级。
+- 升级前应备份数据库；离线备份应先停止服务并保留数据库及尚未检查点合并的 WAL 文件。`--reset` 仍是显式删除默认演示库的操作，不能用作升级步骤。
+
+安全回归包括：两个静态服务的私有文件拒绝访问、编码路径、畸形请求后的进程存活、真实进程重启、历史库完整保留、初始化失败回滚、跨进程编号唯一性和未来 schema 拒绝打开。
 
 ## 控制平面架构（v0.95 新增，参考 mission-control 落地）
 
 ```
 server/index.mjs      入口：静态 UI + /api/v1 + SSE 同进程；--reset 重置数据，--port 自定义
 server/api.mjs        REST 资源面（SPEC §9.1）：路由表 + 鉴权 + 幂等 + 错误信封（409/412/429/451）
-server/store.mjs      存储：node:sqlite（WAL）零依赖；JSON 列模式，无需建表迁移
+server/store.mjs      存储：node:sqlite（WAL）；事务迁移、持久化序列、仅空库演示播种
 server/auth.mjs       API Key + 六角色权限矩阵（SPEC §9.3 + 机器角色 agent）；/setup 首管理员
 server/statemachine.mjs 任务状态机（§5）：合法迁移表 + 审批重检 / 检查点兼容 / 强推二次确认
 server/ops.mjs        opId 三段式执行器（§4.3）：accepted → executed → verified；维护/路由/沙箱对账/GC
@@ -86,12 +98,12 @@ assets/live.js        UI「接入面 · Live」视图（真实数据 + SSE + 状
 | OpenAI 数据中心 | 极简黑白 + 青绿点缀 |
 | 浅色 / 深色 | 通用明、暗两套运维控制台配色 |
 
-主题不止换 CSS 变量：Canvas 手绘图表、跨层拓扑图（2D 与 3D）、物理网络图与 **3D 机房（three.js 场景底色 / 灯光 / 设备发光色 / 机柜标签）** 均实时联动换色（运行时调色板 `AXON_CV`，见 `assets/themes.js`）。各主题截图见 [docs/theme-shots/](docs/theme-shots/)。
+主题不止换 CSS 变量：Canvas 手绘图表、跨层拓扑图（2D 与 3D）、物理网络图与 **3D 机房的选择标记**实时联动换色；机房实体材质与物理照明保持中性（运行时调色板 `AXON_CV`，见 `assets/themes.js`）。各主题截图见 [docs/theme-shots/](docs/theme-shots/)。
 
 ## 建议 5 分钟演示动线
 
 1. **服务器管理 · 设备清单** — 首屏即服务器资产；点开通用服务节点 · 01，看硬件部件、槽位 5 预警、机柜 U 位与网络接入，以及「Agent 工作负载承载」三层链路
-2. **平面布局 / 3D 机房** — 俯视图看机房分区与 14 柜纳管状态；3D 视图（Blender 建模 + WebGL 渲染）环绕机房，点击 R05 看承载详情与预警脉冲，直接点击柜内设备打开资产抽屉
+2. **平面布局 / 3D 机房** — 俯视图看机房分区与 14 柜纳管状态；3D 视图（Blender 建模 + WebGL 渲染）环绕机房，点击 R05 看承载详情与预警标识，直接点击柜内设备打开资产抽屉
 3. **机柜部署 / 网络拓扑** — U 位立柱与三层物理网络（机柜分组区、链路实时利用率）
 4. **编排中心** — 五个场景各走一遍：服务器维护（第 3 步阻塞与解除）、模型端点切换（ctx 超限任务阻塞 + 合规专路）、Agent 退役（能力声明门控确认）、沙箱维护（受保护实例 S05 阻塞）、知识库滚动升级（只读降级解除阻塞）
 5. **拓扑依赖** — 3D 视图环绕跨层依赖图，切换顶栏主题看 3D 场景即时换色；点「影响分析模式」后点击预警服务器，看红色辐射面与影响统计（服务器 → Agent Infra → 任务），2D/3D 双视图同步
@@ -116,13 +128,21 @@ assets/flow.js      维护编排向导状态机（完成后联动服务器槽位
 assets/livesim.js   内置模拟控制平面（线上演示形态）：Live 视图在服务端不可达时的前端复刻
 assets/live.js      接入面 Live 视图：真实控制平面（REST + SSE）与模拟形态自动切换
 assets/vendor/      three.js r187 + addons（本地内置，离线可用，无 CDN 请求）
-assets/models/      Blender 导出的机房模型 dc-a2.glb（14 柜 + 26 设备 + 环境，约 0.5 MB）
+assets/models/      Blender 导出的机房模型 dc-a2.glb（14 柜全量精修 + 26 设备 + 通道/维护区/环境，约 9.4 MiB）
 tools/              3D 建模管线：export-layout.mjs（data.js → 布局 JSON）+ build_dc_model.py（Blender 无头建模 → GLB）
 ```
 
 - 前端纯 vanilla JS；three.js 已本地内置（无 CDN、无字体请求），离线可用；控制平面同样零 npm 依赖（Node 22+ 内置 `node:sqlite` / `node:test`）
 
 ### 3D 机房 · Blender 建模管线
+
+基础校准与全室精修已完成，见 [整室前后效果对比](docs/3d-room-comparison/index.html) 和 [性能/交互验证记录](docs/3d-room-comparison/README.md)。上阶段 [R04 样板对比](docs/3d-comparison/index.html) 保留供追溯。
+
+- 四种视角：机柜区总览、通道、全室、任意机柜近看。近看按所选机柜自动选择朝向并隐藏对侧机柜与顶盖；14 个柜门独立开合。
+- 机柜排按 `dcFloor` 的米制尺寸生成，二维展开示意与 GLB 共用布局源；演示柜间净距 6 cm，冷通道净宽 1.64 m。
+- 外壳不发光，状态仅由 LED 与文字提示；物理材质不随主题换色。机房静止时按需渲染，隐藏视图不绘制。重复网格共享，远处细节带滞回隐藏，静态阴影只在场景显隐变化时重绘。
+- URL 可用 `?dcCamera=overview` / `aisle` / `room` / `rack` 直达视图；追加 `&diagnostics=1` 显示资源计数与可重跑的三镜头性能巡检。正常入口不显示诊断控件。
+- 对比截图来自浏览器实际 WebGL 渲染，机柜和通道分别使用相同相机位置、目标点、FOV、画布尺寸，原版关闭自动旋转。
 
 模型由 Blender 程序化生成，数据与 `assets/data.js` 单一同源（机房布局 / 机柜 / 每台设备的 U 位都来自世界模型）：
 
@@ -131,9 +151,9 @@ node tools/export-layout.mjs                                        # ① 从 da
 blender --background --factory-startup --python tools/build_dc_model.py   # ② 无头建模并导出 assets/models/dc-a2.glb
 ```
 
-- ② 需要 Blender 4.x+（自带 Python + numpy）；产物约 0.5 MB，含程序化防静电地板纹理
+- ② 当前构建验证版本为 Blender 5.2.2（自带 Python + numpy）；产物约 9.4 MiB，含法线、ORM、穿孔门和防静电地板贴图
 - 运行时按命名映射数据：`RACK_<柜号>` 机柜组 / `DEV_<设备id>` U 位面板 / `LED_<设备id>` 状态灯，修改世界模型后重跑 ①② 即可同步 3D 场景
-- 渲染特性：ACES 色调映射、2048 阴影贴图、UnrealBloom 辉光、设备状态发光（预警琥珀脉冲）、机柜选中环、悬浮高亮
+- 渲染特性：ACES 色调映射、2048 阴影贴图、UnrealBloom 辉光、设备 LED 状态色（预警琥珀色）、机柜选中环、悬浮高亮
 - 图表全部 Canvas 手绘（吞吐面积图 / 租户配额柱状 / 延迟折线），拓扑图支持悬停高亮上下游
 - 尊重 `prefers-reduced-motion`；键盘 Esc 关闭抽屉/模态；窄屏自适应降级
 - MCP 接入示例：`claude mcp add axon -e AXON_URL=http://127.0.0.1:8437 -e AXON_API_KEY=axk_xxx -- node mcp/server.mjs`

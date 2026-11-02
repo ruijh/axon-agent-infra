@@ -1,16 +1,18 @@
 /* ═══════════════════════════════════════════════════════════
    AXON · 存储层（SQLite WAL · 零 npm 依赖 · node:sqlite）
-   表设计采用「JSON 列」模式：对象形态演进不需要建表迁移，
-   与 mission-control 的 better-sqlite3 + Zod 路线等价但无依赖。
+   业务对象采用 JSON 列；表结构用 PRAGMA user_version 独立迁移。
+   演示播种与业务数据升级分离，初始化和迁移均以事务执行。
    ═══════════════════════════════════════════════════════════ */
 import { DatabaseSync } from "node:sqlite";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { seedWorld } from "./model.mjs";
-import { nowIso } from "./util.mjs";
+import { ApiError, nowIso } from "./util.mjs";
 
-/** 世界模型版本：目录结构变化时递增，触发重建（保留密钥） */
+/** 演示种子版本只描述首次初始化内容；升级绝不以种子覆盖业务数据。 */
 const SEED_VERSION = "0.95.2";
+const SCHEMA_VERSION = 1;
+const DATA_TABLES = ["objects", "agents", "tasks", "sandboxes", "ops", "events", "api_keys", "idempotency"];
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta        (key TEXT PRIMARY KEY, value TEXT);
@@ -24,6 +26,7 @@ CREATE TABLE IF NOT EXISTS ops         (op_id TEXT PRIMARY KEY, json TEXT);
 CREATE TABLE IF NOT EXISTS events      (seq INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, kind TEXT,
                                         type TEXT, severity TEXT, source TEXT, subject TEXT, msg TEXT, refs TEXT);
 CREATE TABLE IF NOT EXISTS idempotency (key TEXT PRIMARY KEY, request_hash TEXT, response TEXT, created_at TEXT);
+CREATE TABLE IF NOT EXISTS sequences   (name TEXT PRIMARY KEY, next_value INTEGER NOT NULL CHECK(next_value > 0));
 CREATE INDEX IF NOT EXISTS idx_events_subject ON events(subject);
 `;
 
@@ -31,11 +34,30 @@ export class Store {
   constructor(file) {
     if (dirname(file) !== "." && !existsSync(dirname(file))) mkdirSync(dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
-    this.db.exec("PRAGMA journal_mode=WAL;");
-    this.db.exec(SCHEMA);
     this.file = file;
-    this._taskSeq = 742;
-    this._opSeq = 4822;
+    try {
+      this.db.exec("PRAGMA busy_timeout=5000;");
+      const version = this.db.prepare("PRAGMA user_version").get().user_version;
+      if (version > SCHEMA_VERSION) throw new Error(`数据库 schema v${version} 高于程序支持的 v${SCHEMA_VERSION}，请使用匹配版本；数据未重置`);
+      this.db.exec("PRAGMA journal_mode=WAL;");
+      if (version < 1) {
+        this.transaction(() => {
+          // v0 → v1：仅增加持久化序列，不改写任何旧业务记录或 seedVersion。
+          this.db.exec(SCHEMA);
+          this._initializeSequences();
+          this.db.exec("PRAGMA user_version=1;");
+        });
+      }
+    } catch (e) { this.db.close(); throw e; }
+  }
+
+  transaction(fn) {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = fn();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (e) { this.db.exec("ROLLBACK"); throw e; }
   }
 
   /* ── 通用行 ↔ JSON ── */
@@ -45,6 +67,11 @@ export class Store {
   _put(table, idCol, id, obj) {
     this.db.prepare(`INSERT INTO ${table} (${idCol}, json) VALUES (?, ?)
                      ON CONFLICT(${idCol}) DO UPDATE SET json = excluded.json`).run(id, JSON.stringify(obj));
+  }
+  _create(table, idCol, id, obj) {
+    const result = this.db.prepare(`INSERT INTO ${table} (${idCol}, json) VALUES (?, ?)
+      ON CONFLICT(${idCol}) DO NOTHING`).run(id, JSON.stringify(obj));
+    if (!result.changes) throw new ApiError(409, "SOURCE_CONFLICT", `对象 ${id} 已存在，拒绝覆盖`);
   }
   _list(table) {
     return this.db.prepare(`SELECT json FROM ${table}`).all().map(r => JSON.parse(r.json));
@@ -97,6 +124,7 @@ export class Store {
   /* ── Task ── */
   tasks() { return this._list("tasks").sort((a, b) => (a.id < b.id ? 1 : -1)); }
   task(id) { const r = this._row("tasks", "id", id); return r ? JSON.parse(r.json) : null; }
+  createTask(t) { this._create("tasks", "id", t.id, t); }
   putTask(t) { this._put("tasks", "id", t.id, t); }
 
   /* ── Sandbox ── */
@@ -108,6 +136,7 @@ export class Store {
   /* ── Ops（SPEC §4.3 三段式）── */
   ops() { return this._list("ops").sort((a, b) => (a.opId < b.opId ? 1 : -1)); }
   op(opId) { const r = this._row("ops", "op_id", opId); return r ? JSON.parse(r.json) : null; }
+  createOp(o) { this._create("ops", "op_id", o.opId, o); }
   putOp(o) { this._put("ops", "op_id", o.opId, o); }
 
   /* ── Events（§8.1 信封）── */
@@ -140,36 +169,60 @@ export class Store {
     return { conflict: false, response: JSON.parse(r.response) };
   }
 
-  /* ── 序号发生器（进程内即可，SQLite 单写者）── */
-  nextTaskSeq() { return this._taskSeq++; }
-  nextOpSeq() { return this._opSeq++; }
-
-  /* ── 播种与版本迁移 ──
-     世界模型（目录/任务/沙箱/事件/操作）随 SEED_VERSION 变化整体重建，
-     但保留 api_keys 与幂等记录 —— 密钥不因模型升级失效。 */
-  seedIfEmpty() {
-    if (this.getMeta("seedVersion") === SEED_VERSION) return false;
-    for (const t of ["objects", "agents", "tasks", "sandboxes", "ops", "events"]) {
-      this.db.prepare(`DELETE FROM ${t}`).run();
+  /* ── 持久化序列：原子分配，允许失败/崩溃后出现空号，禁止复用 ── */
+  _initializeSequences() {
+    for (const [name, table, col, pattern, floor] of [
+      ["task", "tasks", "id", /^T\d+-(\d+)$/, 742],
+      ["op", "ops", "op_id", /^OP-(\d+)$/, 4822],
+    ]) {
+      let next = floor;
+      for (const row of this.db.prepare(`SELECT ${col} AS id FROM ${table}`).all()) {
+        const match = pattern.exec(row.id);
+        if (match) {
+          const n = Number(match[1]);
+          if (!Number.isSafeInteger(n + 1)) throw new Error(`历史编号超出安全整数范围：${row.id}`);
+          next = Math.max(next, n + 1);
+        }
+      }
+      this.db.prepare(`INSERT INTO sequences (name, next_value) VALUES (?, ?)
+        ON CONFLICT(name) DO UPDATE SET next_value = MAX(sequences.next_value, excluded.next_value)`).run(name, next);
     }
-    const w = seedWorld();
-    w.servers.forEach(x => this.putObject("server", x));
-    w.racks.forEach(x => this.putObject("rack", x));
-    w.netDevices.forEach(x => this.putObject("netdevice", x));
-    w.netLinks.forEach((x, i) => this.putObject("netlink", { id: `link-${i + 1}`, ...x }));
-    w.infra.forEach(x => this.putObject("infra", x));
-    w.models.forEach(x => this.putObject("model", x));
-    w.tools.forEach(x => this.putObject("tool", x));
-    w.routes.forEach(x => this.putObject("route", x));
-    w.tenants.forEach(x => this.putObject("tenant", x));
-    w.agents.forEach(a => this.putAgent(a));
-    w.tasks.forEach(t => this.putTask({ ...t, createdAt: nowIso() }));
-    w.sandboxes.forEach(x => this.putSandbox(x));
-    w.events.forEach(e => this.pushEvent(e));
-    this.setMeta("seeded", nowIso());
-    this.setMeta("seedVersion", SEED_VERSION);
-    this.setMeta("version", "0.95.0");
-    return true;
+  }
+  _nextSeq(name) {
+    const row = this.db.prepare(`UPDATE sequences SET next_value = next_value + 1
+      WHERE name = ? AND next_value < 9007199254740991 RETURNING next_value - 1 AS value`).get(name);
+    if (!row) throw new Error(`序列 ${name} 缺失或已耗尽`);
+    return row.value;
+  }
+  nextTaskSeq() { return this._nextSeq("task"); }
+  nextOpSeq() { return this._nextSeq("op"); }
+
+  /* ── 播种只用于全新空库；结构迁移独立于演示种子版本 ── */
+  seedIfEmpty() {
+    return this.transaction(() => {
+      if (this.getMeta("seeded") !== null || this.getMeta("seedVersion") !== null) return false;
+      // 缺少 meta 的历史库/部分导入库也不能当空库覆盖。
+      if (DATA_TABLES.some(t => this.db.prepare(`SELECT 1 FROM ${t} LIMIT 1`).get())) return false;
+      const w = seedWorld();
+      w.servers.forEach(x => this.putObject("server", x));
+      w.racks.forEach(x => this.putObject("rack", x));
+      w.netDevices.forEach(x => this.putObject("netdevice", x));
+      w.netLinks.forEach((x, i) => this.putObject("netlink", { id: `link-${i + 1}`, ...x }));
+      w.infra.forEach(x => this.putObject("infra", x));
+      w.models.forEach(x => this.putObject("model", x));
+      w.tools.forEach(x => this.putObject("tool", x));
+      w.routes.forEach(x => this.putObject("route", x));
+      w.tenants.forEach(x => this.putObject("tenant", x));
+      w.agents.forEach(a => this.putAgent(a));
+      w.tasks.forEach(t => this.createTask({ ...t, createdAt: nowIso() }));
+      w.sandboxes.forEach(x => this.putSandbox(x));
+      w.events.forEach(e => this.pushEvent(e));
+      this.setMeta("seeded", nowIso());
+      this.setMeta("seedVersion", SEED_VERSION);
+      this.setMeta("version", "0.95.0");
+      this._initializeSequences();
+      return true;
+    });
   }
 
   reset() {
