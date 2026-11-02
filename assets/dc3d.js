@@ -13,6 +13,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { applyEnvironment } from "./env3d.js";
 
 (function () {
   const canvas = $("#dc3d-canvas");
@@ -71,6 +72,8 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
   const sceneColor = () => CV.num("dcBg");
   scene.background = new THREE.Color(sceneColor());
   scene.fog = new THREE.Fog(sceneColor(), 24, 50);
+  /* 环境光照（IBL）：程序化灯箱 → PBR 材质获得反射层次，随主题重建 */
+  applyEnvironment(renderer, scene, CV, 0.8);
 
   const camera = new THREE.PerspectiveCamera(46, 2, 0.1, 120);
   camera.position.set(9.5, 8.2, -12.8);   /* 从 -z 侧看：A 排（纳管 R01-R06）前门正对镜头 */
@@ -111,10 +114,14 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
     ptLights.push(p);
   }
 
-  /* 后期：Bloom（LED / 灯带辉光）+ 输出色调映射 */
-  const composer = new EffectComposer(renderer);
+  /* 后期：MSAA 渲染目标（EffectComposer 会绕过 renderer 原生 antialias，
+     必须自带多重采样）+ Bloom + 色调映射。
+     阈值保持高于最亮浅色主题背景的线性亮度（~0.85），避免背景整体发光；
+     LED/灯带的 emissiveIntensity 顶到阈值之上获得真实辉光 */
+  const msaaRT = new THREE.WebGLRenderTarget(2, 2, { samples: 4, type: THREE.HalfFloatType });
+  const composer = new EffectComposer(renderer, msaaRT);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(2, 2), 0.55, 0.55, 0.72);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(2, 2), 0.85, 0.55, 0.88);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
@@ -135,16 +142,19 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
   scene.add(selRing);
 
   function labelSprite(text, color, alpha) {
+    /* 高分辨率位图（2.5×）+ 各向异性过滤：消除拉近锯齿 / 拉远发糊 */
+    const S = 2.5;
     const c = document.createElement("canvas");
-    c.width = 256; c.height = 64;
+    c.width = Math.round(256 * S); c.height = Math.round(64 * S);
     const g = c.getContext("2d");
-    g.font = "bold 30px Consolas,'Courier New',monospace";
+    g.font = `bold ${Math.round(30 * S)}px Consolas,'Courier New',monospace`;
     g.textAlign = "center"; g.textBaseline = "middle";
-    g.shadowColor = "rgba(0,0,0,.85)"; g.shadowBlur = 6;
+    g.shadowColor = "rgba(0,0,0,.85)"; g.shadowBlur = Math.round(6 * S);
     g.fillStyle = color;
-    g.fillText(text, 128, 34);
+    g.fillText(text, c.width / 2, Math.round(34 * S));
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({
       map: tex, transparent: true, opacity: alpha, depthWrite: false,
     }));
@@ -264,8 +274,8 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
       rec.body.forEach(o => {
         if (!o.material.emissive) return;
         o.material.emissive.set(color);
-        o.material.emissiveIntensity = warn ? 0.5 : 0.55;
-        mats.push({ mat: o.material, base: warn ? 0.5 : 0.55 });
+        o.material.emissiveIntensity = 0.9;
+        mats.push({ mat: o.material, base: 0.9 });
       });
       rec.led.forEach(o => {
         o.material.emissive.set(warn ? CV.num("warn") : CV.num("accentSoft"));
@@ -492,7 +502,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
   renderHud();
   requestAnimationFrame(loop);
 
-  /* ── 主题切换：底色 / 雾 / 灯光 / 发光色 / 标签随调色板刷新 ── */
+  /* ── 主题切换：底色 / 雾 / 灯光 / 环境贴图 / 发光色 / 标签随调色板刷新 ── */
   function applyPalette() {
     const bg = sceneColor();
     scene.background.set(bg);
@@ -502,6 +512,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
     rim.color.set(CV.num("accent"));
     ptLights.forEach(p => p.color.set(CV.num("accentSoft")));
     selRing.material.color.set(CV.num("accent"));
+    applyEnvironment(renderer, scene, CV, 0.8);
     if (ready) {
       applyDevGlow();
       for (let i = 0; i < rackLabels.length; i++) {

@@ -11,6 +11,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { applyEnvironment } from "./env3d.js";
 
 (function () {
   const canvas = $("#topo3d-canvas");
@@ -36,6 +37,8 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
   const scene = new THREE.Scene();
   const bgHex = () => CV.num("bg1");
   scene.background = new THREE.Color(bgHex());
+  /* 环境光照（IBL）：芯片获得顶部高光与反射层次，随主题重建 */
+  applyEnvironment(renderer, scene, CV, 0.5);
   /* 雾只作用于远端余量：主体（相机距 ~150）必须保持全对比度，
      否则浅色主题下白色芯片会被雾融进白色背景 */
   scene.fog = new THREE.Fog(bgHex(), 260, 520);
@@ -61,11 +64,13 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
   key.position.set(40, 80, 60);
   scene.add(key);
 
-  const composer = new EffectComposer(renderer);
+  /* MSAA 渲染目标：EffectComposer 绕过原生 antialias，需自带多重采样 */
+  const msaaRT = new THREE.WebGLRenderTarget(2, 2, { samples: 4, type: THREE.HalfFloatType });
+  const composer = new EffectComposer(renderer, msaaRT);
   composer.addPass(new RenderPass(scene, camera));
   /* 阈值 0.97：高于最亮浅色主题背景的线性亮度（~0.95），
-     避免整片背景过 Bloom；粒子材质色 ×2.6 仍稳过阈值发光 */
-  const bloom = new UnrealBloomPass(new THREE.Vector2(2, 2), 0.5, 0.5, 0.97);
+     避免整片背景过 Bloom；粒子材质色 ×2.6 与灯带 emissiveIntensity 1.8+ 稳过阈值发光 */
+  const bloom = new UnrealBloomPass(new THREE.Vector2(2, 2), 1.0, 0.55, 0.97);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
@@ -89,23 +94,26 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
     });
   });
 
-  /* ── 文本精灵 ─────────────────────────────────────────── */
+  /* ── 文本精灵（2.5× 高分辨率 + 各向异性：消除锯齿与发糊）── */
   function textSprite(lines, opts = {}) {
+    const S = 2.5;
     const c = document.createElement("canvas");
-    c.width = 320; c.height = 44 + (lines.length - 1) * 26;
+    c.width = Math.round(320 * S);
+    c.height = Math.round((44 + (lines.length - 1) * 26) * S);
     const g = c.getContext("2d");
     g.textAlign = "center"; g.textBaseline = "middle";
     lines.forEach((ln, i) => {
       g.font = ln.mono
-        ? `12px Consolas,"Courier New",monospace`
-        : `bold 15px "Segoe UI","Microsoft YaHei",sans-serif`;
-      if (ln.shadow !== false) { g.shadowColor = "rgba(0,0,0,.75)"; g.shadowBlur = 5; }
+        ? `${Math.round(12 * S)}px Consolas,"Courier New",monospace`
+        : `bold ${Math.round(15 * S)}px "Segoe UI","Microsoft YaHei",sans-serif`;
+      if (ln.shadow !== false) { g.shadowColor = "rgba(0,0,0,.75)"; g.shadowBlur = Math.round(5 * S); }
       else { g.shadowColor = "transparent"; g.shadowBlur = 0; }
       g.fillStyle = ln.color;
-      g.fillText(ln.text, c.width / 2, 26 + i * 26);
+      g.fillText(ln.text, c.width / 2, Math.round((26 + i * 26) * S));
     });
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({
       map: tex, transparent: true, depthWrite: false,
     }));
@@ -158,7 +166,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
       new THREE.MeshStandardMaterial({
         color: 0x000000,
         emissive: new THREE.Color(LAYER_META[n.layer].color),
-        emissiveIntensity: 0.85,
+        emissiveIntensity: 2.2,
         transparent: true,
       }),
     );
@@ -174,9 +182,10 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
     const dotCol = statusDotColor(n);
     let dot = null;
     if (dotCol) {
+      /* 颜色增益 ×2.2：状态点稳过 Bloom 阈值获得辉光 */
       dot = new THREE.Mesh(
         new THREE.SphereGeometry(0.38, 10, 10),
-        new THREE.MeshBasicMaterial({ color: dotCol, transparent: true }),
+        new THREE.MeshBasicMaterial({ color: new THREE.Color(dotCol).multiplyScalar(2.2), transparent: true }),
       );
       dot.position.set(5.3, 1.55, 0.5);
       group.add(dot);
@@ -295,7 +304,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
       strip.material.opacity = a;
       if (label) label.material.opacity = a;
       if (dot) dot.material.opacity = a;
-      strip.material.emissiveIntensity = (n.id === selId || n.id === hoverId) ? 1.6 : (inImpact ? 1.2 : 0.85);
+      strip.material.emissiveIntensity = (n.id === selId || n.id === hoverId) ? 2.8 : (inImpact ? 2.4 : 2.2);
       body.material.emissive = body.material.emissive || new THREE.Color();
       if (isRoot) { body.material.emissive.set(CV.hex("crit")); body.material.emissiveIntensity = 0.55; }
       else if (n.id === hoverId || n.id === selId) { body.material.emissive.set(CV.hex("accent")); body.material.emissiveIntensity = 0.35; }
@@ -344,11 +353,12 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
   /* 2D 侧发起的影响分析同步到 3D（graph.js emit） */
   AXON.on("topo-impact", (st) => { impact = st || { on: false, rootId: null, set: null }; updateStates(); });
 
-  /* ── 主题联动：全部取色重建 ──────────────────────────── */
+  /* ── 主题联动：全部取色重建（含环境贴图）─────────────── */
   function applyPalette() {
     scene.background.set(bgHex());
     scene.fog.color.set(bgHex());
     hemi.groundColor.set(bgHex());
+    applyEnvironment(renderer, scene, CV, 0.5);
     chips.forEach((rec, id) => {
       const { body, n, group } = rec;
       body.material.color.set(CV.num("node"));
@@ -363,11 +373,11 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
       rec.label = lb;
       const dotCol = statusDotColor(n);
       if (rec.dot) {
-        if (dotCol) rec.dot.material.color.set(dotCol);
+        if (dotCol) rec.dot.material.color.set(new THREE.Color(dotCol).multiplyScalar(2.2));
         else { group.remove(rec.dot); rec.dot = null; }
       } else if (dotCol) {
         const d2 = new THREE.Mesh(new THREE.SphereGeometry(0.38, 10, 10),
-          new THREE.MeshBasicMaterial({ color: dotCol, transparent: true }));
+          new THREE.MeshBasicMaterial({ color: new THREE.Color(dotCol).multiplyScalar(2.2), transparent: true }));
         d2.position.set(5.3, 1.55, 0.5);
         group.add(d2);
         rec.dot = d2;
