@@ -1,0 +1,50 @@
+{
+  "themeSwitches": 16,
+  "viewSwitches": 40,
+  "before": {
+    "ready": true,
+    "view": "overview",
+    "autoRotate": false,
+    "openDoors": [
+      "R17"
+    ],
+    "focusedRack": "R17",
+    "renderedFrames": 1246,
+    "calls": 296,
+    "triangles": 72426,
+    "detailVisible": 0,
+    "warningDevices": 1,
+    "mappedDevices": 26,
+    "textures": 24,
+    "geometries": 311,
+    "programs": 18,
+    "camera": [
+      5.3,
+      5.3,
+      -6.4
+    ]
+  },
+  "after": {
+    "ready": true,
+    "view": "overview",
+    "autoRotate": false,
+    "openDoors": [
+      "R17"
+    ],
+    "focusedRack": "R17",
+    "renderedFrames": 2463,
+    "calls": 296,
+    "triangles": 72426,
+    "detailVisible": 0,
+    "warningDevices": 1,
+    "mappedDevices": 26,
+    "textures": 24,
+    "geometries": 311,
+    "programs": 18,
+    "camera": [
+      5.3,
+      5.3,
+      -6.4
+    ]
+  }
+}

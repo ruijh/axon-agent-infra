@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AXON · 整室精修前后对比</title>
+<style>
+  *{box-sizing:border-box}body{margin:0;background:#eef0f1;color:#283039;font:15px/1.65 "Segoe UI","Microsoft YaHei",sans-serif}
+  main{max-width:1320px;margin:auto;padding:32px 28px 56px}h1{font-size:28px;line-height:1.3;margin:0 0 10px;font-weight:650}p{margin:8px 0;color:#4c5962;max-width:850px}
+  nav{display:flex;gap:8px;margin:24px 0 14px;flex-wrap:wrap}button{padding:10px 18px;font:inherit;cursor:pointer;background:#fff;color:#34434e;border:1px solid #b4bec5;border-radius:4px}button[aria-pressed=true]{background:#304d60;color:white;border-color:#304d60}button:focus-visible,input:focus-visible{outline:3px solid #3385b5;outline-offset:3px}
+  .compare{position:relative;aspect-ratio:16/9;background:#14202b;overflow:hidden;border:1px solid #b4bec5}.compare img{width:100%;height:100%;object-fit:contain;position:absolute;inset:0}.before{clip-path:inset(0 50% 0 0)}.divider{position:absolute;top:0;bottom:0;width:2px;background:#fff;left:50%;box-shadow:0 0 0 1px #0005;pointer-events:none}
+  .tag{position:absolute;bottom:18px;padding:4px 11px;background:#18232be8;color:#fff;font-size:13px}.left{left:14px}.right{right:14px}.control{display:flex;gap:18px;align-items:center;margin:14px 0 20px}.control input{flex:1;accent-color:#304d60;cursor:ew-resize}.control output{width:90px;font-variant-numeric:tabular-nums;text-align:right}
+  .notes{display:grid;grid-template-columns:1fr 1fr;gap:32px;border-top:1px solid #bdc6cc;padding-top:16px}h2{font-size:17px;margin:0 0 8px}ul{margin:0;padding-left:20px;color:#4c5962}a{color:#245b7c}.meta{font-size:13px;margin-top:20px}figure{margin:24px 0 0}figure img{width:100%;display:block;border:1px solid #bdc6cc}figcaption{padding-top:8px;color:#52616c;font-size:13px}
+  @media(max-width:700px){main{padding:22px 14px}h1{font-size:23px}.notes{grid-template-columns:1fr;gap:18px}.control{gap:10px}.tag{font-size:11px;bottom:10px}.meta{font-size:12px}}
+</style>
+<main>
+  <h1>A2 机房 · 整室精修前后对比</h1>
+  <p>从 R04 样板推广到整个机房：14 座机柜、26 台设备、完整通道与维护区。截图来自实际浏览器 WebGL 渲染；每组使用相同镜头、FOV 与画布尺寸。</p>
+  <nav aria-label="对比场景">
+    <button data-scene="overview" aria-pressed="true">机柜区总览</button>
+    <button data-scene="aisle" aria-pressed="false">冷通道</button>
+    <button data-scene="room" aria-pressed="false">全室</button>
+    <button id="show-before">只看改造前</button><button id="show-after">只看改造后</button>
+  </nav>
+  <div class="compare">
+    <img id="after" src="after-overview.jpg" alt="推广后：全室统一的机柜与通道">
+    <img id="before" class="before" src="before-overview.jpg" alt="推广前：基础校准与单柜样板">
+    <div class="divider"></div><span class="tag left">改造前</span><span class="tag right">改造后</span>
+  </div>
+  <div class="control"><label for="split">拖动对比</label><input id="split" type="range" min="0" max="100" value="50" aria-label="改造前画面的占比"><output for="split">50% / 50%</output></div>
+  <div class="notes">
+    <section><h2>统一精修</h2><ul><li>14 柜：独立网孔门、导轨、U 位刻度、铭牌、后门与 PDU。</li><li>26 台设备：托盘、拉手、接口、紧固件，保留原有 ID 与 U 位。</li><li>通道两端门框、穿孔地板、桥架与线缆、维护区标线、灯具与墙板。</li></ul></section>
+    <section><h2>交互与性能</h2><ul><li>总览 / 通道 / 全室 / 逐柜近看，前后排正确切换。</li><li>设备直达资产、机柜 U 位跳转、告警与八套主题保持可用。</li><li>重复几何共享、远近细节切换、静态阴影复用与按需渲染。</li></ul></section>
+  </div>
+  <p class="meta">“推广前”是上一阶段已完成基础校准和 R04 样板的版本。两版使用相同镜头、FOV 与画布尺寸。总览和全室采用顶部剖切，通道保留顶盖；截图均为实际 WebGL 渲染。未修改业务数据库。<a href="README.md">查看性能和验收记录</a> · <a href="http://127.0.0.1:53385/?dcCamera=overview">打开实时机房</a></p>
+  <figure><img src="after-inspection.jpg" alt="R02 设备面板与可开合柜门"><figcaption>R02 近看：精修已从 GPU 样板推广到其他设备类型与机柜。</figcaption></figure>
+</main>
+<script>
+const split=document.querySelector('#split'), before=document.querySelector('#before'), after=document.querySelector('#after');
+function update(value){split.value=value;before.style.clipPath=`inset(0 ${100-value}% 0 0)`;document.querySelector('.divider').style.left=value+'%';document.querySelector('output').textContent=`${value}% / ${100-value}%`;document.querySelector('.left').hidden=value==0;document.querySelector('.right').hidden=value==100;}
+split.addEventListener('input',()=>update(split.value));
+document.querySelector('#show-before').onclick=()=>update(100);document.querySelector('#show-after').onclick=()=>update(0);
+document.querySelectorAll('[data-scene]').forEach(b=>b.onclick=()=>{const scene=b.dataset.scene;before.src=`before-${scene}.jpg`;after.src=`after-${scene}.jpg`;before.alt="整室推广前 · "+scene;after.alt="整室推广后 · "+scene;document.querySelectorAll('[data-scene]').forEach(el=>el.setAttribute('aria-pressed',String(el===b)));update(50);});
+</script>
+</html>

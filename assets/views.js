@@ -376,8 +376,11 @@ function rackColumnHtml(rk) {
 function renderFloor() {
   const D = AXON_DATA, F = D.dcFloor;
   const W = 1440, H = 480, RW = 168, RD = 72;
-  const rowY = { A: 96, B: 290 };
-  const xs = (i) => 128 + i * 181;
+  // Expanded schematic for legible labels; actual metre coordinates come from dcFloor.
+  const rowY = Object.fromEntries(F.rows.map(r => [r.id, 96 + (F.rowY[r.id] - F.rowY.A) / (F.rowY.B - F.rowY.A) * 194]));
+  const span = F.rackX(6) - F.rackX(0);
+  const xs = i => 128 + (F.rackX(i) - F.rackX(0)) / span * 1086;
+  const aisleWidth = (F.rowY.B - F.rowY.A - F.rackSize.d).toFixed(2);
   const managed = new Set(D.racks.map(r => r.id));
   const totalRacks = F.rows.reduce((a, r) => a + r.racks.length, 0);
   const sel = AXON.floorRack && managed.has(AXON.floorRack) ? AXON.floorRack : "R04";
@@ -390,7 +393,7 @@ function renderFloor() {
   [[26, 100], [26, 216], [26, 332], [1390, 190]].forEach(([cx, cy]) =>
     els.push(`<g class="fp-crac"><rect x="${cx}" y="${cy}" width="32" height="72" rx="3"/><text x="${cx + 16}" y="${cy + 40}">CRAC</text></g>`));
   els.push(`<g class="fp-door"><rect x="86" y="${H - 28}" width="64" height="10"/><text x="118" y="${H - 34}">入口</text></g>`);
-  els.push(`<g class="fp-aisle"><rect x="118" y="186" width="1174" height="86" rx="4"/><text x="${W / 2}" y="234">冷通道 · COLD AISLE（封闭）</text></g>`);
+  els.push(`<g class="fp-aisle"><rect x="118" y="186" width="1174" height="86" rx="4"/><text x="${W / 2}" y="234">冷通道 · COLD AISLE（净宽 ${aisleWidth} m）</text></g>`);
   els.push(`<text class="fp-hot" x="${W / 2}" y="56">热通道 · HOT AISLE</text>`);
   els.push(`<text class="fp-hot" x="${W / 2}" y="408">热通道 · HOT AISLE</text>`);
 
@@ -404,7 +407,7 @@ function renderFloor() {
         const nSrv = devs.filter(m => m.kind === "server").length;
         const nNet = devs.length - nSrv;
         const devList = devs.map(m => m.ref.name).join(" / ");
-        els.push(`<g class="fp-rack managed ${rid === sel ? "sel" : ""}" data-rack="${rid}" transform="translate(${x},${y})">
+        els.push(`<g class="fp-rack managed ${rid === sel ? "sel" : ""}" data-rack="${rid}" data-x="${F.rackX(i)}" data-y="${F.rowY[row.id]}" transform="translate(${x},${y})">
           <title>${rid} · ${esc(rk.note)}｜已用 ${usedU}U / ${RACK_UNITS}U｜${nSrv}×服务器 + ${nNet}×网络设备｜${esc(devList)}</title>
           <rect class="fp-rack-rect" width="${RW}" height="${RD}" rx="4"/>
           <g clip-path="url(#fpc-${rid})">
@@ -417,7 +420,7 @@ function renderFloor() {
           <line class="fp-front" x1="4" y1="${RD}" x2="${RW - 4}" y2="${RD}"/>
         </g>`);
       } else {
-        els.push(`<g class="fp-rack unmanaged" data-rack="${rid}" transform="translate(${x},${y})">
+        els.push(`<g class="fp-rack unmanaged" data-rack="${rid}" data-x="${F.rackX(i)}" data-y="${F.rowY[row.id]}" transform="translate(${x},${y})">
           <rect class="fp-rack-rect" width="${RW}" height="${RD}" rx="4"/>
           <text class="fp-rack-name" x="${RW / 2}" y="40" text-anchor="middle">${rid}</text>
           <text class="fp-rack-sub" x="${RW / 2}" y="56" text-anchor="middle">未纳管</text>
@@ -429,7 +432,7 @@ function renderFloor() {
 
   $("#servers-floor-wrap").innerHTML = `
     <div class="panel">
-      <div class="dc-breadcrumb">华东-1 · A 栋 — <b>A2 机房</b>（22×12 m · ${totalRacks} 柜，纳管 ${managed.size} 柜）— 冷热通道封闭 · 精密空调 ×4 · 悬停机柜看清单 · 点击机柜查看 U 位</div>
+      <div class="dc-breadcrumb">华东-1 · A 栋 — <b>A2 机房</b>（22×12 m · ${totalRacks} 柜，纳管 ${managed.size} 柜）— 机柜区域示意（非等比例）· 柜间净距 ${Math.round((F.rackX(1)-F.rackX(0)-F.rackSize.w)*100)} cm · 精密空调 ×4 · 悬停机柜看清单 · 点击机柜查看 U 位</div>
       <div class="fp-layout">
         <svg viewBox="0 0 ${W} ${H}" class="fp-svg" id="fp-svg">${els.join("")}</svg>
         <aside class="fp-detail" id="fp-detail"></aside>

@@ -153,8 +153,9 @@ const AXON_DATA = {
   dcFloor: {
     room: "A2 机房",
     size: { w: 22, d: 12 },
-    rowY: { A: 3.4, B: 8.6 },
-    rackX: (i) => 2.6 + i * 2.8,
+    rowY: { A: 3.4, B: 6.2 },
+    rackSize: { w: 0.62, d: 1.16, h: 2.05 },
+    rackX: (i) => 8.96 + i * 0.68,
     rows: [
       { id: "A", label: "03 列 · A 排", racks: ["R01", "R02", "R03", "R04", "R05", "R06", "R07"] },
       { id: "B", label: "03 列 · B 排", racks: ["R11", "R12", "R13", "R14", "R15", "R16", "R17"] },

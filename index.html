@@ -101,10 +101,19 @@
           <div class="panel">
             <div class="panel-head">
               <h2>数据中心 3D 视图 · A2 机房</h2>
-              <span id="dc3d-hint" class="panel-note">Blender 建模 · WebGL 渲染 · 拖拽环绕 · 滚轮缩放 · 点击机柜/设备查看详情</span>
+              <span id="dc3d-hint" class="panel-note">拖拽环绕 · 滚轮缩放 · 点击设备查看资产</span>
             </div>
             <div class="dc3d-wrap">
               <canvas id="dc3d-canvas"></canvas>
+              <div class="dc3d-views" role="group" aria-label="机房视角">
+                <button class="btn tiny" data-dc-view="overview" aria-pressed="true">总览</button>
+                <button class="btn tiny" data-dc-view="aisle" aria-pressed="false">通道</button>
+                <button class="btn tiny" data-dc-view="room" aria-pressed="false">全室</button>
+                <button class="btn tiny" data-dc-view="rack" aria-pressed="false">机柜近看</button>
+                <select class="btn tiny" id="dc3d-rack-select" aria-label="近看机柜"></select>
+                <button class="btn tiny" id="dc3d-door" aria-pressed="false">打开 R04 柜门</button>
+              </div>
+              <div id="dc3d-labels" class="dc3d-labels"></div>
               <div class="dc3d-hud" id="dc3d-hud"></div>
               <div class="net-legend" id="dc3d-legend"></div>
             </div>

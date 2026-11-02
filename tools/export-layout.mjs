@@ -20,6 +20,8 @@ const layout = {
   room: D.dcFloor.room,
   size: D.dcFloor.size,
   rowY: D.dcFloor.rowY,
+  rackSize: D.dcFloor.rackSize,
+  rackX: D.dcFloor.rows[0].racks.map((_, i) => D.dcFloor.rackX(i)),
   rows: D.dcFloor.rows.map(r => ({ id: r.id, label: r.label, racks: r.racks })),
   crac: D.dcFloor.crac,
   managedRacks: D.racks.map(r => ({ id: r.id, name: r.name, note: r.note })),

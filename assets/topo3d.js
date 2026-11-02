@@ -11,7 +11,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { applyEnvironment } from "./env3d.js";
+import { applyEnvironment, disposeEnvironment } from "./env3d.js";
 
 (function () {
   const canvas = $("#topo3d-canvas");
@@ -37,14 +37,14 @@ import { applyEnvironment } from "./env3d.js";
   const scene = new THREE.Scene();
   const bgHex = () => CV.num("bg1");
   scene.background = new THREE.Color(bgHex());
-  /* 环境光照（IBL）：芯片获得顶部高光与反射层次，随主题重建 */
+  /* Neutral IBL is reused across UI themes. */
   applyEnvironment(renderer, scene, CV, 0.5);
   /* 雾只作用于远端余量：主体（相机距 ~150）必须保持全对比度，
      否则浅色主题下白色芯片会被雾融进白色背景 */
   scene.fog = new THREE.Fog(bgHex(), 260, 520);
 
   const camera = new THREE.PerspectiveCamera(48, 2, 0.1, 600);
-  camera.position.set(26, 44, 150);
+  camera.position.set(0, 24, 153);
 
   const controls = new OrbitControls(camera, canvas);
   controls.target.set(0, 0, 0);
@@ -54,7 +54,7 @@ import { applyEnvironment } from "./env3d.js";
   controls.maxDistance = 240;
   controls.minPolarAngle = 0.15;
   controls.maxPolarAngle = 1.42;
-  controls.autoRotate = !REDUCED;
+  controls.autoRotate = false;
   controls.autoRotateSpeed = 0.45;
   controls.addEventListener("start", () => { controls.autoRotate = false; });
 
@@ -68,9 +68,8 @@ import { applyEnvironment } from "./env3d.js";
   const msaaRT = new THREE.WebGLRenderTarget(2, 2, { samples: 4, type: THREE.HalfFloatType });
   const composer = new EffectComposer(renderer, msaaRT);
   composer.addPass(new RenderPass(scene, camera));
-  /* 阈值 0.97：高于最亮浅色主题背景的线性亮度（~0.95），
-     避免整片背景过 Bloom；粒子材质色 ×2.6 与灯带 emissiveIntensity 1.8+ 稳过阈值发光 */
-  const bloom = new UnrealBloomPass(new THREE.Vector2(2, 2), 1.0, 0.55, 0.97);
+  /* Labels stay below the restrained bloom threshold. */
+  const bloom = new UnrealBloomPass(new THREE.Vector2(2, 2), 0.12, 0.2, 1.6);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
@@ -99,24 +98,25 @@ import { applyEnvironment } from "./env3d.js";
     const S = 2.5;
     const c = document.createElement("canvas");
     c.width = Math.round(320 * S);
-    c.height = Math.round((44 + (lines.length - 1) * 26) * S);
+    c.height = Math.round((48 + (lines.length - 1) * 34) * S);
     const g = c.getContext("2d");
     g.textAlign = "center"; g.textBaseline = "middle";
     lines.forEach((ln, i) => {
       g.font = ln.mono
-        ? `${Math.round(12 * S)}px Consolas,"Courier New",monospace`
-        : `bold ${Math.round(15 * S)}px "Segoe UI","Microsoft YaHei",sans-serif`;
+        ? `${Math.round(24 * S)}px Consolas,"Courier New",monospace`
+        : `bold ${Math.round(38 * S)}px "Segoe UI","Microsoft YaHei",sans-serif`;
       if (ln.shadow !== false) { g.shadowColor = "rgba(0,0,0,.75)"; g.shadowBlur = Math.round(5 * S); }
       else { g.shadowColor = "transparent"; g.shadowBlur = 0; }
       g.fillStyle = ln.color;
-      g.fillText(ln.text, c.width / 2, Math.round((26 + i * 26) * S));
+      g.fillText(ln.text, c.width / 2, Math.round((26 + i * 34) * S), c.width - 16 * S);
     });
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: tex, transparent: true, depthWrite: false,
+      map: tex, transparent: true, depthWrite: false, depthTest: false, toneMapped: false,
     }));
+    sp.position.z = 0.55; sp.renderOrder = 10;
     const w = opts.w || 13;
     sp.scale.set(w, w * c.height / c.width, 1);
     return sp;
@@ -166,7 +166,7 @@ import { applyEnvironment } from "./env3d.js";
       new THREE.MeshStandardMaterial({
         color: 0x000000,
         emissive: new THREE.Color(LAYER_META[n.layer].color),
-        emissiveIntensity: 2.2,
+        emissiveIntensity: 0.25,
         transparent: true,
       }),
     );
@@ -304,7 +304,7 @@ import { applyEnvironment } from "./env3d.js";
       strip.material.opacity = a;
       if (label) label.material.opacity = a;
       if (dot) dot.material.opacity = a;
-      strip.material.emissiveIntensity = (n.id === selId || n.id === hoverId) ? 2.8 : (inImpact ? 2.4 : 2.2);
+      strip.material.emissiveIntensity = (n.id === selId || n.id === hoverId) ? 0.8 : (inImpact ? 0.6 : 0.25);
       body.material.emissive = body.material.emissive || new THREE.Color();
       if (isRoot) { body.material.emissive.set(CV.hex("crit")); body.material.emissiveIntensity = 0.55; }
       else if (n.id === hoverId || n.id === selId) { body.material.emissive.set(CV.hex("accent")); body.material.emissiveIntensity = 0.35; }
@@ -353,7 +353,7 @@ import { applyEnvironment } from "./env3d.js";
   /* 2D 侧发起的影响分析同步到 3D（graph.js emit） */
   AXON.on("topo-impact", (st) => { impact = st || { on: false, rootId: null, set: null }; updateStates(); });
 
-  /* ── 主题联动：全部取色重建（含环境贴图）─────────────── */
+  /* ── 主题联动：图表配色更新（环境贴图复用）─────────────── */
   function applyPalette() {
     scene.background.set(bgHex());
     scene.fog.color.set(bgHex());
@@ -374,7 +374,7 @@ import { applyEnvironment } from "./env3d.js";
       const dotCol = statusDotColor(n);
       if (rec.dot) {
         if (dotCol) rec.dot.material.color.set(new THREE.Color(dotCol).multiplyScalar(2.2));
-        else { group.remove(rec.dot); rec.dot = null; }
+        else { group.remove(rec.dot); rec.dot.geometry.dispose(); rec.dot.material.dispose(); rec.dot = null; }
       } else if (dotCol) {
         const d2 = new THREE.Mesh(new THREE.SphereGeometry(0.38, 10, 10),
           new THREE.MeshBasicMaterial({ color: new THREE.Color(dotCol).multiplyScalar(2.2), transparent: true }));
@@ -422,6 +422,7 @@ import { applyEnvironment } from "./env3d.js";
   let lastDraw = 0;
   function spawnParticles() {
     const focus = focusSet();
+    if (!focus || REDUCED) return;
     const free = particles.filter(p => p.t >= 1);
     edges.forEach(e => {
       const eo = edgeObjOf.get(e);
@@ -456,24 +457,36 @@ import { applyEnvironment } from "./env3d.js";
     composer.render();
     lastDraw = performance.now();
   }
+  let raf, disposed = false;
   function loop() {
-    requestAnimationFrame(loop);
+    if (disposed) return;
+    raf = requestAnimationFrame(loop);
     if (!active()) return;
     frame();
   }
-  /* 页签隐藏时 rAF/ResizeObserver 都可能错过尺寸变化：心跳兜底补 resize + 出帧 */
-  setInterval(() => {
-    if (!active()) return;
-    if (!W) resize();
-    if (performance.now() - lastDraw > 400) frame();
-  }, 250);
-
   AXON.on("topo-mode", (m) => { if (m !== "2d") { resize(); } });
   AXON.on("view", (v) => { if (v === "topo") requestAnimationFrame(() => resize()); });
-  new ResizeObserver(() => { if (active()) resize(); }).observe(canvas.parentElement);
+  const resizeObserver = new ResizeObserver(() => { if (active()) resize(); });
+  resizeObserver.observe(canvas.parentElement);
   resize();
   requestAnimationFrame(loop);
 
+  window.addEventListener("pagehide", e => {
+    if (e.persisted) return;
+    disposed = true; cancelAnimationFrame(raf); resizeObserver.disconnect(); controls.dispose();
+    disposeEnvironment(scene);
+    const geometries = new Set(), materials = new Set(), textures = new Set();
+    scene.traverse(o => {
+      if (o.geometry) geometries.add(o.geometry);
+      for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
+        if (!m) continue;
+        materials.add(m);
+        Object.values(m).forEach(v => { if (v?.isTexture) textures.add(v); });
+      }
+    });
+    textures.forEach(t => t.dispose()); materials.forEach(m => m.dispose()); geometries.forEach(g => g.dispose());
+    composer.passes.forEach(p => p.dispose?.()); composer.dispose(); renderer.dispose();
+  });
   /* 调试/测试钩子 */
   AXON.topo3d = { state: () => ({ hoverId, selId, impactOn: impact.on, ready: true }) };
   window.__topo3d_api = { scene, camera, renderer, controls, composer, chips, edgeObjs, resize, info: () => renderer.info.render };

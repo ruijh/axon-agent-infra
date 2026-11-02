@@ -1,20 +1,12 @@
-/* ═══════════════════════════════════════════════════════════
-   AXON · 3D 环境光照（IBL）共享模块
-   PMREMGenerator + 程序化"灯箱"场景：顶部白天光板 + 两侧主题色
-   补光板 + 地面弱反弹板 → scene.environment。
-   替代无环境贴图的扁平 PBR（塑料感根因），且可随主题重建换色。
-   零新增 vendor 依赖：PMREMGenerator 为 three 核心 API。
-   ═══════════════════════════════════════════════════════════ */
+/* Neutral studio IBL. Retain the RenderTarget so disposal frees its buffers. */
 import * as THREE from "three";
+const environments = new WeakMap();
 
-/**
- * buildEnvTexture(renderer, opts) → PMREM 环境贴图
- * opts: { top?:number 天光强度, sideA/sideB?:number 侧板颜色(num),
- *         sideI?:number 侧板强度, ground?:number 地反弹强度 }
- */
-export function buildEnvTexture(renderer, opts = {}) {
+/** The caller owns the returned WebGLRenderTarget. */
+export function buildEnvironment(renderer) {
   const pmrem = new THREE.PMREMGenerator(renderer);
   const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x353a40);
   const panel = (colorNum, intensity, w, h, x, y, z, rx, ry) => {
     const m = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
@@ -27,27 +19,30 @@ export function buildEnvTexture(renderer, opts = {}) {
     m.rotation.set(rx, ry, 0);
     scene.add(m);
   };
-  panel(0xffffff, opts.top ?? 3.5, 14, 14, 0, 9, 0, Math.PI / 2, 0);                       // 天光
-  panel(opts.sideA ?? 0xffffff, opts.sideI ?? 1.5, 10, 7, -10, 3.5, 0, 0, Math.PI / 2);    // 左侧主题色补光
-  panel(opts.sideB ?? 0xffffff, (opts.sideI ?? 1.5) * 0.8, 10, 7, 10, 3.5, 0, 0, -Math.PI / 2); // 右侧补光（稍弱）
-  panel(0xffffff, opts.ground ?? 0.7, 16, 16, 0, -6, 0, -Math.PI / 2, 0);                  // 地面反弹
-  const rt = pmrem.fromScene(scene, 0.08);
-  pmrem.dispose();
-  scene.traverse(o => {
-    if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); }
-  });
-  return rt.texture;
+  panel(0xffffff, 2.8, 12, 5, 0, 7, 0, Math.PI / 2, 0);
+  panel(0xffffff, 1.8, 5, 8, -7, 3, 1, 0, Math.PI / 2);
+  panel(0xffffff, 1.1, 7, 4, 7, 3, -2, 0, -Math.PI / 2);
+  panel(0xffffff, 0.35, 12, 12, 0, -5, 0, -Math.PI / 2, 0);
+  try { return pmrem.fromScene(scene, 0.04); }
+  finally {
+    pmrem.dispose();
+    scene.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+  }
 }
 
-/** 主题化环境：按调色板重建 scene.environment（旧贴图安全释放） */
-export function applyEnvironment(renderer, scene, cv, intensity = 0.6) {
-  const tex = buildEnvTexture(renderer, {
-    sideA: cv.num("steel"),
-    sideB: cv.num("accent"),
-    sideI: 1.4,
-  });
-  if (scene.environment && scene.environment.dispose) scene.environment.dispose();
-  scene.environment = tex;
-  if ("environmentIntensity" in scene) scene.environmentIntensity = intensity;
-  return tex;
+/** UI themes never change physical lighting or allocate another IBL. */
+export function applyEnvironment(renderer, scene, _palette, intensity = 0.7) {
+  let target = environments.get(scene);
+  if (!target) { target = buildEnvironment(renderer); environments.set(scene, target); }
+  scene.environment = target.texture;
+  scene.environmentIntensity = intensity;
+  return target.texture;
+}
+
+export function disposeEnvironment(scene) {
+  const target = environments.get(scene);
+  if (!target) return;
+  if (scene.environment === target.texture) scene.environment = null;
+  target.dispose();
+  environments.delete(scene);
 }

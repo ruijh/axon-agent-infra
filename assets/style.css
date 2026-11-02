@@ -732,7 +732,7 @@ body::after {
 
 /* ── 3D 机房 ── */
 .dc3d-wrap {
-  position: relative; height: 540px;
+  position: relative; height: clamp(400px, calc(100dvh - 275px), 620px);
   border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
   background:
     radial-gradient(700px 380px at 50% -10%, var(--canvas-amb), transparent 70%),
@@ -751,6 +751,22 @@ body::after {
 .dc3d-hud .h-title { font-size: 13.5px; font-weight: 600; color: var(--text-bright); }
 .dc3d-hud .h-kv { font-family: var(--mono); font-size: 11px; }
 .dc3d-hud .btn { margin-top: 8px; }
+.dc3d-views { position: absolute; top: 12px; left: 12px; display: flex; flex-wrap: wrap; gap: 6px; z-index: 3; max-width: calc(100% - 370px); }
+.dc3d-views .btn { min-height: 30px; background: var(--pop-bg); }
+.dc3d-views .btn[aria-pressed="true"] { border-color: var(--cyan); color: var(--text-bright); box-shadow: inset 0 -2px var(--cyan); }
+.dc3d-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.dc3d-label { position: absolute; transform: translate(-50%, -50%); padding: 2px 5px; font: 11px var(--mono); color: #edf1f3; background: #283038e6; border: 1px solid #68737c; border-radius: 2px; white-space: nowrap; }
+.dc3d-label[data-managed="false"] { color: #c1c7cb; background: #464e54dd; }
+.dc3d-label { pointer-events: auto; cursor: pointer; }
+.dc3d-label:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.dc3d-label[hidden] { display: none; }
+#dc3d-rack-select { max-width: 124px; color: var(--text-bright); }
+#dc3d-rack-select option { background: var(--panel); color: var(--text-bright); }
+@media (max-width: 800px) {
+  .dc3d-wrap { height: 580px; }
+  .dc3d-views { max-width: calc(100% - 24px); }
+  .dc3d-hud { top: auto; bottom: 46px; right: 10px; left: 10px; min-width: 0; max-width: none; font-size: 11px; }
+}
 
 /* ── 网络拓扑 ── */
 .net-canvas-wrap {

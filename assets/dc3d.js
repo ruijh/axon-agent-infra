@@ -13,7 +13,9 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { applyEnvironment } from "./env3d.js";
+import { applyEnvironment, disposeEnvironment } from "./env3d.js";
+import { showDetail, rackView, visibleInTree, pickHit } from "./dc3d-policy.js";
+import { installBenchmark } from "./scene-benchmark.js";
 
 (function () {
   const canvas = $("#dc3d-canvas");
@@ -22,9 +24,9 @@ import { applyEnvironment } from "./env3d.js";
   const D = AXON_DATA;
   const F = D.dcFloor;
 
-  /* 设备种类 → 运行时发光色（面板 + LED）· 随主题调色板 */
+  /* 设备状态色只用于 LED；物理表面保持中性 */
   const CV = window.AXON_CV;
-  const kindGlow = () => ({ server: CV.num("l0"), net: CV.num("l2"), bmc: CV.num("violet"), warn: CV.num("warn") });
+  const kindGlow = () => ({ server: 0x78cba1, net: 0x70b5dc, bmc: 0x70b5dc, warn: 0xeab558 });
 
   /* 机柜实体：dcFloor 布局 + racks 纳管状态（与旧版数据口径一致） */
   function rackStats(rid) {
@@ -57,23 +59,25 @@ import { applyEnvironment } from "./env3d.js";
   /* ── 渲染器 / 场景 ───────────────────────────────────── */
   let renderer;
   try {
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
   } catch (e) {
     hud.innerHTML = `<div class="h-title">3D 视图不可用</div><div class="h-kv">当前环境不支持 WebGL2</div>`;
     return;
   }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.shadowMap.autoUpdate = false;
+  renderer.info.autoReset = false;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.25;
+  renderer.toneMappingExposure = 0.95;
 
   const scene = new THREE.Scene();
-  const sceneColor = () => CV.num("dcBg");
+  const sceneColor = () => 0x626b72;
   scene.background = new THREE.Color(sceneColor());
-  scene.fog = new THREE.Fog(sceneColor(), 24, 50);
-  /* 环境光照（IBL）：程序化灯箱 → PBR 材质获得反射层次，随主题重建 */
-  applyEnvironment(renderer, scene, CV, 0.8);
+  scene.fog = new THREE.Fog(sceneColor(), 36, 70);
+  /* 中性环境光照（IBL），主题切换复用同一 RenderTarget */
+  applyEnvironment(renderer, scene, CV, 0.85);
 
   const camera = new THREE.PerspectiveCamera(46, 2, 0.1, 120);
   camera.position.set(9.5, 8.2, -12.8);   /* 从 -z 侧看：A 排（纳管 R01-R06）前门正对镜头 */
@@ -82,34 +86,34 @@ import { applyEnvironment } from "./env3d.js";
   controls.target.set(0, 0.9, 0);
   controls.enableDamping = true;
   controls.dampingFactor = 0.07;
-  controls.minDistance = 3.5;
+  controls.minDistance = 1;
   controls.maxDistance = 30;
   controls.minPolarAngle = 0.12;
   controls.maxPolarAngle = 1.42;
-  controls.autoRotate = !REDUCED;
+  controls.autoRotate = false;
   controls.autoRotateSpeed = 0.65;
   controls.addEventListener("start", () => { controls.autoRotate = false; });
 
-  /* 灯光：半球环境 + 主光（带阴影）+ 主题色轮廓光 + 冷通道点光 */
-  const hemi = new THREE.HemisphereLight(0x9fc3ff, 0x0a1226, 0.8);
+  /* 中性照明：半球补光 + 主阴影光 + 柔和轮廓光 + 通道灯具 */
+  const hemi = new THREE.HemisphereLight(0xe5e9ed, 0x68645f, 0.45);
   scene.add(hemi);
-  const key = new THREE.DirectionalLight(0xdfeaff, 2.6);
-  key.position.set(10, 16, -9);
+  const key = new THREE.DirectionalLight(0xfff4e6, 2.3);
+  key.position.set(-3, 10, -5);
   key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
-  key.shadow.camera.left = -15; key.shadow.camera.right = 15;
-  key.shadow.camera.top = 15; key.shadow.camera.bottom = -15;
+  key.shadow.camera.left = -14; key.shadow.camera.right = 14;
+  key.shadow.camera.top = 10; key.shadow.camera.bottom = -10;
   key.shadow.camera.near = 1; key.shadow.camera.far = 50;
   key.shadow.bias = -0.0003;
-  key.shadow.normalBias = 0.02;
+  key.shadow.normalBias = 0.004;
   scene.add(key);
-  const rim = new THREE.DirectionalLight(CV.num("accent"), 1.2);
-  rim.position.set(-14, 7, 9);
+  const rim = new THREE.DirectionalLight(0xe3edfa, 0.9);
+  rim.position.set(5, 4, 7);
   scene.add(rim);
   const ptLights = [];
-  for (const px of [-4.5, 4.5]) {
-    const p = new THREE.PointLight(CV.num("accentSoft"), 36, 10, 2);
-    p.position.set(px, 2.7, 0);
+  for (const px of [-1.5, 1.5]) {
+    const p = new THREE.PointLight(0xfff6eb, 3, 5, 2);
+    p.position.set(px, 2.65, 1.2);
     scene.add(p);
     ptLights.push(p);
   }
@@ -121,7 +125,7 @@ import { applyEnvironment } from "./env3d.js";
   const msaaRT = new THREE.WebGLRenderTarget(2, 2, { samples: 4, type: THREE.HalfFloatType });
   const composer = new EffectComposer(renderer, msaaRT);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(2, 2), 0.85, 0.55, 0.88);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(2, 2), 0.12, 0.2, 1.6);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
@@ -132,42 +136,96 @@ import { applyEnvironment } from "./env3d.js";
   const rackBodyMats = new Map();    // rid → [{ mat }]（悬停高亮用）
   const devGlow = [];                // [{ mats, warn, color }]
   let ready = false;
+  const doorPivots = new Map(), openDoors = new Set(), detailObjects = [];
+  let currentView = "overview", focusedRack = "R04";
+  const views = {
+    room: { eye: [14, 12, -17], target: [0, .5, 0] },
+    overview: { eye: [5.3, 5.3, -6.4], target: [0, 0.9, 1.1] },
+    aisle: { eye: [-4.2, 1.65, 1.2], target: [0.4, 1.15, 1.2] },
+    rack: { eye: [0.65, 1.5, -0.75], target: [0, 1.04, 2.55] },
+  };
+  const doorId = () => selId || focusedRack;
+  function syncDoorButton() {
+    const id = doorId(), open = openDoors.has(id);
+    const button = $("#dc3d-door");
+    button.textContent = `${open ? "关闭" : "打开"} ${id} 柜门`;
+    button.setAttribute("aria-pressed", String(open));
+    button.disabled = !doorPivots.has(id);
+  }
+  function setDoor(open, id = doorId()) {
+    const pivot = doorPivots.get(id);
+    if (!pivot) return;
+    pivot.rotation.y = open ? Math.PI * 0.62 : 0;
+    if (open) openDoors.add(id); else openDoors.delete(id);
+    syncDoorButton(); invalidate();
+  }
+  function focusRack(id) {
+    if (!rackGroups.has(id)) return;
+    focusedRack = id; selId = id;
+    $("#dc3d-rack-select").value = id;
+    setView("rack");
+  }
+  function setView(name) {
+    if (!views[name]) return;
+    currentView = name;
+    if (name === "rack") views.rack = rackView(racks.find(r => r.id === focusedRack), F);
+    // Flush damping before jumping to a reproducible preset.
+    controls.enableDamping = false; controls.update();
+    camera.fov = views[name].fov || 46; camera.updateProjectionMatrix();
+    camera.position.fromArray(views[name].eye);
+    controls.target.fromArray(views[name].target);
+    controls.update(); controls.enableDamping = true;
+    controls.autoRotate = false;
+    $$("[data-dc-view]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.dcView === name)));
+    const focusedRow = F.rows.find(row => row.racks.includes(focusedRack));
+    rackGroups.forEach((group, id) => { group.visible = name !== "rack" || focusedRow.racks.includes(id); });
+    scene.traverse(o => {
+      if (o.name === "ENV_ContainRoof" || o.name === "ENV_CeilingFixtures") o.visible = name === "aisle";
+    });
+    renderer.shadowMap.needsUpdate = true;
+    if (name === "rack") setDoor(true, focusedRack);
+    syncDoorButton();
+    renderHud();
+    invalidate();
+  }
+  $$("[data-dc-view]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.dcView === "rack" && selId) focusRack(selId);
+    else setView(b.dataset.dcView);
+  }));
+  $("#dc3d-door").addEventListener("click", () => setDoor(!openDoors.has(doorId())));
+  $("#dc3d-rack-select").innerHTML = racks.map(r => `<option value="${r.id}"${r.id === focusedRack ? " selected" : ""}>${r.id}${r.managed ? "" : " · 未纳管"}</option>`).join("");
+  $("#dc3d-rack-select").addEventListener("change", e => focusRack(e.target.value));
 
-  const selRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.86, 0.012, 10, 56),
-    new THREE.MeshBasicMaterial({ color: CV.num("accent"), transparent: true, opacity: 0.9 }),
+  const selRing = new THREE.LineLoop(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-0.33, 0, -0.6), new THREE.Vector3(0.33, 0, -0.6),
+      new THREE.Vector3(0.33, 0, 0.6), new THREE.Vector3(-0.33, 0, 0.6),
+    ]),
+    new THREE.LineBasicMaterial({ color: CV.num("accent"), transparent: true, opacity: 0.9 }),
   );
-  selRing.rotation.x = -Math.PI / 2;
   selRing.visible = false;
   scene.add(selRing);
 
-  function labelSprite(text, color, alpha) {
-    /* 高分辨率位图（2.5×）+ 各向异性过滤：消除拉近锯齿 / 拉远发糊 */
-    const S = 2.5;
-    const c = document.createElement("canvas");
-    c.width = Math.round(256 * S); c.height = Math.round(64 * S);
-    const g = c.getContext("2d");
-    g.font = `bold ${Math.round(30 * S)}px Consolas,'Courier New',monospace`;
-    g.textAlign = "center"; g.textBaseline = "middle";
-    g.shadowColor = "rgba(0,0,0,.85)"; g.shadowBlur = Math.round(6 * S);
-    g.fillStyle = color;
-    g.fillText(text, c.width / 2, Math.round(34 * S));
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: tex, transparent: true, opacity: alpha, depthWrite: false,
-    }));
-    sp.scale.set(1.05, 0.26, 1);
-    return sp;
-  }
-
   function onModel(root) {
+    racks.forEach(r => {
+      const pivot = root.getObjectByName("DOOR_PIVOT_" + r.id);
+      if (pivot) doorPivots.set(r.id, pivot);
+    });
     /* 轴向说明：Blender Z-up → glTF/three Y-up（three.z = -blender.y） */
     root.traverse(o => {
       if (!o.isMesh) return;
       const n = o.name;
-      if (n.startsWith("DOOR_") || n.startsWith("LED_") || n.startsWith("ENV_Contain") || n.startsWith("ENV_Strip") || n.startsWith("ENV_ColdFloor") || n.startsWith("CRAC_")) {
+      if (o.material.name === "M_Door_PerforatedMesh") {
+        // Square perforations on a tall door. Multisample coverage and filtered
+        // alpha prevent a coarse, stretched lattice / moire at aisle distances.
+        o.material.map.repeat.set(2, 7);
+        o.material.map.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        o.material.alphaToCoverage = true;
+        o.material.alphaTest = .25;
+        o.material.metalness = 0; // painted perforated steel, not exposed metal
+        o.material.roughness = .64;
+      }
+      if (n.startsWith("DETAIL_") || n.startsWith("MICRO_") || n.startsWith("DOOR_") || n.startsWith("LED_") || n.startsWith("ENV_Contain") || n.startsWith("ENV_Strip") || n.startsWith("ENV_ColdFloor") || n.startsWith("CRAC_")) {
         o.castShadow = false;                       // 玻璃/发光件不投影，避免遮挡
       } else {
         o.castShadow = true;
@@ -191,8 +249,12 @@ import { applyEnvironment } from "./env3d.js";
       /* 每柜克隆材质（悬停高亮互不影响）+ 收集拾取件 */
       const bodyMats = [];
       g.traverse(o => {
+        if (o.name.startsWith("MECHANICS_") || o.name.startsWith("DETAIL_"))
+          detailObjects.push({object:o, rackId:rk.id, center:wp.clone().add(new THREE.Vector3(0,1,0))});
         if (!o.isMesh) return;
-        o.material = o.material.clone();
+        // Shared neutral materials stay shared; only per-rack hover surfaces
+        // and per-device LEDs need independent mutable state.
+        if (o.name.startsWith("BODY_") || o.name.startsWith("LED_")) o.material = o.material.clone();
         if (o.name.startsWith("BODY_")) {
           o.material.emissive = new THREE.Color(CV.num("accent"));
           o.material.emissiveIntensity = 0;
@@ -202,30 +264,17 @@ import { applyEnvironment } from "./env3d.js";
       });
       rackBodyMats.set(rk.id, bodyMats);
 
-      /* 机柜号标签（主题切换时按调色板重建） */
-      const lb = labelSprite(rk.id, CV.hex("textBright"), rk.managed ? 0.95 : 0.5);
-      lb.position.copy(wp).add(new THREE.Vector3(0, 2.42, 0));
-      scene.add(lb);
-      rackLabels.push({ sp: lb, id: rk.id, managed: rk.managed });
+      /* 屏幕空间机柜标签，不参与 Bloom / 色调映射 */
+      const label = document.createElement("button");
+      label.className = "dc3d-label";
+      label.textContent = rk.id + (rk.hasWarn ? " · 预警" : "");
+      label.dataset.managed = rk.managed;
+      label.setAttribute("aria-label", `查看机柜 ${rk.id}${rk.hasWarn ? " · 硬件预警" : ""}`);
+      label.addEventListener("click", () => { selId = rk.id; renderHud(); invalidate(); });
+      $("#dc3d-labels").append(label);
+      rackLabels.push({ el: label, position: wp.clone().add(new THREE.Vector3(0, 2.18, 0)), id: rk.id });
 
-      /* 预警机柜：顶部琥珀脉冲点 */
-      if (rk.hasWarn) {
-        const c = document.createElement("canvas");
-        c.width = c.height = 64;
-        const g2 = c.getContext("2d");
-        const grad = g2.createRadialGradient(32, 32, 2, 32, 32, 30);
-        grad.addColorStop(0, "rgba(255,196,90,1)");
-        grad.addColorStop(0.4, "rgba(255,160,50,.55)");
-        grad.addColorStop(1, "rgba(255,160,50,0)");
-        g2.fillStyle = grad; g2.fillRect(0, 0, 64, 64);
-        const tex = new THREE.CanvasTexture(c);
-        const dot = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
-        dot.scale.set(0.5, 0.5, 1);
-        dot.position.copy(wp).add(new THREE.Vector3(0, 2.14, 0));
-        dot.userData.pulse = true;
-        scene.add(dot);
-        warnDots.push(dot);
-      }
+
     });
 
     /* 设备发光映射：DEV_<id> 面板 / LED_<id> 灯条 → 运行时状态色 */
@@ -236,6 +285,13 @@ import { applyEnvironment } from "./env3d.js";
     devMeshes.clear();
     root.traverse(o => {
       if (!o.isMesh) return;
+      if (o.userData.devId) {
+        const id = o.userData.devId;
+        const rec = devMeshes.get(id) || { body: [], led: [] };
+        rec[o.name.startsWith("LED_") ? "led" : "body"].push(o);
+        devMeshes.set(id, rec);
+        return;
+      }
       let m = /^(DEV_.+?)_bez$/.exec(o.name);
       const isBez = !!m;
       if (!m) m = /^(DEV_.+)$/.exec(o.name);
@@ -259,12 +315,18 @@ import { applyEnvironment } from "./env3d.js";
     scene.add(root);
     ready = true;
     applyDevGlow();
+    setView(new URLSearchParams(location.search).get("dcCamera") || "overview");
+    canvas.dataset.ready = "true";
+    if (new URLSearchParams(location.search).has("dcCamera")) {
+      AXON.serversTab = "3d"; AXON.nav("servers"); renderServersTab();
+    }
     renderHud();
   }
 
-  /* 设备发光按当前主题上色（模型加载后 / 主题切换后调用） */
+  /* 重建 LED 状态映射；列表有界，机箱材质不发光 */
   function applyDevGlow() {
     const G = kindGlow();
+    devGlow.length = 0;
     devMeshes.forEach((rec, id) => {
       const dv = devByIdLive.get(id);
       if (!dv) return;
@@ -273,20 +335,19 @@ import { applyEnvironment } from "./env3d.js";
       const mats = [];
       rec.body.forEach(o => {
         if (!o.material.emissive) return;
-        o.material.emissive.set(color);
-        o.material.emissiveIntensity = 0.9;
-        mats.push({ mat: o.material, base: 0.9 });
+        o.material.emissive.set(0x000000);
+        o.material.emissiveIntensity = 0;
       });
       rec.led.forEach(o => {
-        o.material.emissive.set(warn ? CV.num("warn") : CV.num("accentSoft"));
-        o.material.emissiveIntensity = warn ? 2.2 : 3.2;
-        mats.push({ mat: o.material, base: warn ? 2.2 : 3.2 });
+        o.material.color.set(color);
+        o.material.emissive.set(color);
+        o.material.emissiveIntensity = 1.8;
+        mats.push({ mat: o.material, base: 1.8 });
       });
-      if (warn && !devGlow.some(g => g.mats === mats)) devGlow.push({ mats, warn: true });
+      if (warn) devGlow.push({ mats, warn: true });
     });
   }
 
-  const warnDots = [];
   const rackLabels = [];
   const devByIdLive = new Map();
   const loader = new GLTFLoader();
@@ -316,6 +377,7 @@ import { applyEnvironment } from "./env3d.js";
       hud.innerHTML = `<div class="h-title">A2 机房</div><div class="h-kv">正在加载 Blender 模型…</div>`;
       return;
     }
+    syncDoorButton();
     const total = racks.length;
     const managed = racks.filter(r => r.managed).length;
     const rk = racks.find(r => r.id === selId);
@@ -323,13 +385,14 @@ import { applyEnvironment } from "./env3d.js";
       hud.innerHTML = `<div class="h-title">A2 机房 · 概览</div>
         <div class="h-kv">机柜 ${total} · 纳管 ${managed} · 服务器 ${D.servers.length} · 网络设备 ${D.netDevices.length}</div>
         <div class="h-kv">冷通道封闭 · 精密空调 ×4 · 双路供电</div>
-        <div style="margin-top:6px">点击任一机柜查看承载详情 · Blender 建模 · WebGL 实时渲染</div>`;
+        <div style="margin-top:6px">${currentView === "rack" ? focusedRack + " 剖切视角 · 对侧机柜与顶盖隐藏" : "全室统一精修 · 14 座 42U 机柜"}<br>选择机柜可查看设备与 U 位</div>`;
       return;
     }
     if (!rk.managed) {
       hud.innerHTML = `<div class="h-title">机柜 ${esc(rk.id)}</div>
         <div class="h-kv">状态：未纳管</div>
-        <div style="margin-top:6px">该机柜不在当前管理范围（纳管 ${D.racks.map(r => r.id).join(" / ")}）</div>`;
+        <div style="margin-top:6px">该机柜不在当前管理范围（纳管 ${D.racks.map(r => r.id).join(" / ")}）</div><button class="btn tiny" id="dc3d-inspect-rack">近看 ${esc(rk.id)}</button>`;
+      $("#dc3d-inspect-rack").onclick = () => focusRack(rk.id);
       return;
     }
     const meta = D.racks.find(r => r.id === rk.id);
@@ -339,7 +402,9 @@ import { applyEnvironment } from "./env3d.js";
       <div class="h-kv">已用 ${st.usedU}U / 42U · ${st.devs.length} 台设备${st.hasWarn ? ' · <span style="color:var(--warn)">存在硬件预警</span>' : ""}</div>
       <div style="margin:6px 0 2px">${st.devs.map(m =>
         `<span class="dep-chip" data-3d-dev="${m.ref.id}" data-kind="${m.kind}">${esc(m.ref.name.replace(" · ", " "))}</span>`).join("")}</div>
-      <button class="btn tiny" id="dc3d-open-rack">查看机柜 U 位</button>`;
+      <button class="btn tiny" id="dc3d-open-rack">查看机柜 U 位</button>
+      <button class="btn tiny" id="dc3d-inspect-rack">近看 ${esc(rk.id)}</button>`;
+    $("#dc3d-inspect-rack").onclick = () => focusRack(rk.id);
     $$("#dc3d-hud [data-3d-dev]").forEach(ch => ch.addEventListener("click", () => openDev(ch.dataset["3dDev"], ch.dataset.kind)));
     $("#dc3d-open-rack").onclick = () => { AXON.serversTab = "rack"; renderServersTab(); };
   }
@@ -356,10 +421,9 @@ import { applyEnvironment } from "./env3d.js";
     `<span><i style="border-color:var(--l-infra)"></i>已纳管机柜</span>` +
     `<span><i style="border-color:var(--dc-rack-off)"></i>未纳管</span>` +
     `<span style="color:var(--orange)">● 硬件预警</span>` +
-    `<span><i style="border-color:var(--l-server)"></i>服务器</span>` +
-    `<span><i style="border-color:var(--l-catalog)"></i>网络设备</span>` +
-    `<span><i style="border-color:var(--violet)"></i>带外</span>` +
-    `<span>Blender 建模 · glTF 实时渲染</span>`;
+    `<span>绿灯：设备正常</span>` +
+    `<span>蓝灯：网络 / 带外</span>` +
+    `<span>示意布局 · 冷通道净宽 1.64 m</span>`;
 
   /* ── 拾取与交互 ──────────────────────────────────────── */
   const ray = new THREE.Raycaster();
@@ -371,30 +435,9 @@ import { applyEnvironment } from "./env3d.js";
     const r = canvas.getBoundingClientRect();
     ndc.set(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ndc, camera);
-    const hits = ray.intersectObjects(pickables, false);
-    /* 前门玻璃会先命中：向后再找 0.2m 内的设备面，命中则视为点设备 */
-    for (let i = 0; i < hits.length; i++) {
-      const h = hits[i];
-      if (h.object.userData.devId) return { devId: h.object.userData.devId, rackId: rackOfMesh(h.object) };
-      if (h.object.name.startsWith("DOOR_")) {
-        for (let j = i + 1; j < hits.length && hits[j].distance - h.distance < 0.2; j++) {
-          if (hits[j].object.userData.devId) return { devId: hits[j].object.userData.devId, rackId: rackOfMesh(hits[j].object) };
-        }
-        return { devId: null, rackId: rackOfMesh(h.object) };
-      }
-      const rid = rackOfMesh(h.object);
-      if (rid) return { devId: null, rackId: rid };
-    }
-    return null;
-  }
-  function rackOfMesh(o) {
-    let p = o;
-    while (p) {
-      const m = /^RACK_(.+)$/.exec(p.name || "");
-      if (m) return m[1];
-      p = p.parent;
-    }
-    return null;
+    const visible = pickables.filter(visibleInTree);
+    const hits = ray.intersectObjects(visible, false);
+    return pickHit(hits);
   }
 
   function setHover(h) {
@@ -404,9 +447,10 @@ import { applyEnvironment } from "./env3d.js";
     hoverId = h ? h.rackId : null;
     hoverDev = h ? h.devId : null;
     if (hoverId) {
-      (rackBodyMats.get(hoverId) || []).forEach(({ mat }) => (mat.emissiveIntensity = 0.22));
+      (rackBodyMats.get(hoverId) || []).forEach(({ mat }) => (mat.emissiveIntensity = 0.035));
     }
     canvas.style.cursor = h ? "pointer" : "grab";
+    invalidate();
   }
 
   canvas.addEventListener("pointerdown", (e) => {
@@ -423,6 +467,7 @@ import { applyEnvironment } from "./env3d.js";
     if (hit && hit.devId) { openDev(hit.devId, devKind(hit.devId)); return; }
     selId = hit ? hit.rackId : null;
     renderHud();
+    invalidate();
   });
   canvas.addEventListener("pointermove", (e) => {
     if (!active() || !ready || downPos) return;
@@ -436,105 +481,107 @@ import { applyEnvironment } from "./env3d.js";
     return n && n.kind === "bmc" ? "bmc" : "net";
   }
 
-  /* ── 渲染循环（仅本页签可见时渲染）──────────────────── */
+  /* Render only when the camera or scene changes; hidden tabs never draw. */
   const active = () => AXON.view === "servers" && AXON.serversTab === "3d" && !document.hidden;
-
-  let W = 0;
+  let W = 0, H = 0, frames = 2, stopped = false, raf;
+  function invalidate() { frames = 32; }
+  controls.addEventListener("change", invalidate);
   function resize() {
     const r = canvas.parentElement.getBoundingClientRect();
     if (!r.width || !r.height) return;
     const w = Math.round(r.width), h = Math.round(r.height);
-    W = w;
-    renderer.setSize(w, h, false);
-    composer.setSize(w, h);
-    bloom.setSize(w, h);
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
+    if (W === w && H === h) return;
+    W = w; H = h;
+    renderer.setSize(w, h, false); composer.setSize(w, h);
+    camera.aspect = w / h; camera.updateProjectionMatrix(); invalidate();
   }
-
-  const t0 = performance.now();
-  let lastDraw = 0;
+  const projected = new THREE.Vector3();
+  function updateLabels() {
+    const occupied = [];
+    rackLabels.forEach(({ el, position, id }) => {
+      projected.copy(position).project(camera);
+      const x = (projected.x + 1) * W / 2, y = (1 - projected.y) * H / 2;
+      const inView = projected.z > -1 && projected.z < 1 && x > 20 && x < W - 20 && y > 58 && y < H - 45;
+      const nearView = (currentView === "rack" && id !== focusedRack) || !rackGroups.get(id)?.visible;
+      const collides = occupied.some(p => Math.abs(x - p.x) < 48 && Math.abs(y - p.y) < 24);
+      el.hidden = !inView || nearView || collides;
+      if (!el.hidden) { el.style.left = x + "px"; el.style.top = y + "px"; occupied.push({ x, y }); }
+    });
+  }
+  let renderedFrames = 0, benchmark;
   function frame() {
-    if (!active()) return;
-    if (!W) resize();
-    controls.update();
-    const t = (performance.now() - t0) / 1000;
-    const pulse = 0.5 + 0.5 * Math.sin(t * 4);
-    /* 预警设备发光脉冲 */
-    devGlow.forEach(({ mats }) => mats.forEach(({ mat, base }) => {
-      mat.emissiveIntensity = base * (0.45 + 0.75 * pulse);
-    }));
-    warnDots.forEach(d => { d.material.opacity = 0.45 + 0.55 * pulse; });
-    /* 选中环 */
-    if (selId && rackGroups.has(selId)) {
-      const g = rackGroups.get(selId);
-      const wp = new THREE.Vector3();
-      g.getWorldPosition(wp);
-      selRing.position.set(wp.x, 0.02, wp.z);
-      selRing.visible = true;
-      selRing.material.opacity = 0.5 + 0.4 * pulse;
-      const s = 1 + 0.03 * Math.sin(t * 3);
-      selRing.scale.set(s, s, 1);
-    } else {
-      selRing.visible = false;
+    benchmark?.before();
+    if (!active() || !ready || !frames) return;
+    const start = performance.now();
+    resize(); frames--; controls.update();
+    detailObjects.forEach(d => {
+      d.object.visible = showDetail(camera.position.distanceTo(d.center),d.object.visible,currentView === "rack" && d.rackId === focusedRack);
+    });
+    selRing.visible = !!selId && rackGroups.has(selId);
+    if (selRing.visible) {
+      rackGroups.get(selId).getWorldPosition(selRing.position);
+      selRing.position.y = 0.025;
+      selRing.material.opacity = 0.65;
     }
-    composer.render();
-    lastDraw = performance.now();
+    updateLabels(); renderer.info.reset(); composer.render(); renderedFrames++;
+    benchmark?.after(performance.now() - start, performance.now());
+    if (diagnostics) diagnostics.textContent = JSON.stringify({
+      ready, view: currentView, autoRotate: controls.autoRotate, openDoors: [...openDoors], focusedRack, renderedFrames,
+      calls: renderer.info.render.calls, triangles: renderer.info.render.triangles,
+      detailVisible: detailObjects.filter(d => visibleInTree(d.object)).length,
+      warningDevices: devGlow.length, mappedDevices: devMeshes.size,
+      textures: renderer.info.memory.textures, geometries: renderer.info.memory.geometries,
+      programs: renderer.info.programs.length, camera: camera.position.toArray(),
+    });
   }
-  function loop() {
-    requestAnimationFrame(loop);
-    frame();
+  // Explicit developer mode exposes diagnostics as inspectable text, never in normal UI.
+  let diagnostics;
+  if (new URLSearchParams(location.search).has("diagnostics")) {
+    diagnostics = document.createElement("output");
+    diagnostics.id = "dc3d-diagnostics";
+    diagnostics.style.cssText = "display:block;font:11px monospace;overflow-wrap:anywhere";
+    canvas.parentElement.after(diagnostics);
+    const benchContainer = document.createElement("div"); diagnostics.after(benchContainer);
+    benchmark = installBenchmark({ renderer, canvas, container: benchContainer, active, ready: () => ready,
+      setView, getView: () => currentView, invalidate,
+      orbit: angle => { camera.position.sub(controls.target).applyAxisAngle(new THREE.Vector3(0,1,0),angle).add(controls.target); },
+    });
   }
-  /* 页签被遮挡时 rAF 会停摆：低频心跳兜底出帧（预览/截图/投屏场景） */
-  setInterval(() => {
-    if (active() && performance.now() - lastDraw > 400) frame();
-  }, 250);
+  function loop() { if (stopped) return; raf = requestAnimationFrame(loop); frame(); }
+  AXON.on("servers-tab-3d", () => { setHover(null); resize(); renderHud(); invalidate(); });
+  AXON.on("view", invalidate);
+  document.addEventListener("visibilitychange", invalidate);
+  const resizeObserver = new ResizeObserver(() => { if (active()) resize(); });
+  resizeObserver.observe(canvas.parentElement);
+  resize(); renderHud(); raf = requestAnimationFrame(loop);
 
-  AXON.on("servers-tab-3d", () => {
-    setHover(null);
-    resize();
-    renderHud();
-    requestAnimationFrame(() => { resize(); });
-    setTimeout(resize, 120);
-  });
-  new ResizeObserver(() => { if (active()) resize(); }).observe(canvas.parentElement);
-  resize();
-  renderHud();
-  requestAnimationFrame(loop);
-
-  /* ── 主题切换：底色 / 雾 / 灯光 / 环境贴图 / 发光色 / 标签随调色板刷新 ── */
+  // Physical materials, lights and environment remain neutral across all UI themes.
   function applyPalette() {
-    const bg = sceneColor();
-    scene.background.set(bg);
-    scene.fog.color.set(bg);
-    hemi.color.set(CV.num("steel"));
-    hemi.groundColor.set(bg);
-    rim.color.set(CV.num("accent"));
-    ptLights.forEach(p => p.color.set(CV.num("accentSoft")));
     selRing.material.color.set(CV.num("accent"));
-    applyEnvironment(renderer, scene, CV, 0.8);
-    if (ready) {
-      applyDevGlow();
-      for (let i = 0; i < rackLabels.length; i++) {
-        const { sp, id, managed } = rackLabels[i];
-        const lb = labelSprite(id, CV.hex("textBright"), managed ? 0.95 : 0.5);
-        lb.position.copy(sp.position);
-        scene.remove(sp);
-        sp.material.map.dispose();
-        sp.material.dispose();
-        scene.add(lb);
-        rackLabels[i] = { sp: lb, id, managed };
-      }
-    }
+    rackBodyMats.forEach(mats => mats.forEach(({ mat }) => mat.emissive.set(CV.num("accent"))));
+    if (ready) applyDevGlow();
+    invalidate();
   }
   AXON.on("theme", applyPalette);
-
-  AXON.dc3d = { renderHud, state: () => ({ selId, hoverId, auto: controls.autoRotate, ready }) };
-  window.__dc3d = AXON.dc3d;   /* 调试/测试钩子 */
-  window.__dc3d_api = {        /* 调参入口：曝光 / 灯强 / 渲染统计 */
-    scene, camera, renderer, controls, composer,
-    lights: { hemi, key, rim, ptLights },
-    setExposure: (v) => { renderer.toneMappingExposure = v; },
-    info: () => renderer.info.render,
-  };
+  function dispose() {
+    stopped = true; cancelAnimationFrame(raf); resizeObserver.disconnect(); controls.dispose();
+    document.removeEventListener("visibilitychange", invalidate);
+    disposeEnvironment(scene);
+    const geometries = new Set(), materials = new Set(), textures = new Set();
+    scene.traverse(o => {
+      if (o.geometry) geometries.add(o.geometry);
+      for (const mat of (Array.isArray(o.material) ? o.material : [o.material])) {
+        if (!mat) continue;
+        materials.add(mat);
+        Object.values(mat).forEach(v => { if (v?.isTexture) textures.add(v); });
+      }
+    });
+    textures.forEach(t => t.dispose()); materials.forEach(m => m.dispose()); geometries.forEach(g => g.dispose());
+    composer.passes.forEach(p => p.dispose?.()); composer.dispose(); renderer.dispose();
+  }
+  window.addEventListener("pagehide", e => { if (!e.persisted) dispose(); });
+  AXON.dc3d = { renderHud, state: () => ({ selId, hoverId, auto: controls.autoRotate, ready, currentView }) };
+  window.__dc3d = AXON.dc3d;
+  window.__dc3d_api = { scene, camera, renderer, controls, composer, setView, dispose,
+    lights: { hemi, key, rim, ptLights }, info: () => renderer.info.render };
 })();
