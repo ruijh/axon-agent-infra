@@ -279,8 +279,8 @@ import { installBenchmark } from "./scene-benchmark.js";
 
     /* 设备发光映射：DEV_<id> 面板 / LED_<id> 灯条 → 运行时状态色 */
     devByIdLive.clear();
-    [...D.servers.map(s => ({ id: s.id, kind: "server", state: s.state })),
-     ...D.netDevices.map(n => ({ id: n.id, kind: n.kind === "bmc" ? "bmc" : "net", state: n.state }))]
+    [...D.servers.map(s => ({ id: s.id, kind: "server", ref:s })),
+     ...D.netDevices.map(n => ({ id: n.id, kind: n.kind === "bmc" ? "bmc" : "net", ref:n }))]
       .forEach(dv => devByIdLive.set(dv.id, dv));
     devMeshes.clear();
     root.traverse(o => {
@@ -323,6 +323,19 @@ import { installBenchmark } from "./scene-benchmark.js";
     renderHud();
   }
 
+  let statusSignature='';
+  AXON.on('tick',()=>{
+    if(!ready)return;
+    const next=JSON.stringify([...D.servers,...D.netDevices].map(d=>[d.id,d.state]));
+    if(next===statusSignature)return;statusSignature=next;
+    for(const label of rackLabels){
+      const warn=rackStats(label.id).hasWarn;
+      label.el.textContent=label.id+(warn?' · 预警':'');
+      label.el.setAttribute('aria-label',`查看机柜 ${label.id}${warn?' · 硬件预警':''}`);
+    }
+    applyDevGlow();renderHud();invalidate();
+  });
+
   /* 重建 LED 状态映射；列表有界，机箱材质不发光 */
   function applyDevGlow() {
     const G = kindGlow();
@@ -330,7 +343,7 @@ import { installBenchmark } from "./scene-benchmark.js";
     devMeshes.forEach((rec, id) => {
       const dv = devByIdLive.get(id);
       if (!dv) return;
-      const warn = dv.state === "warn";
+      const warn = dv.ref.state === "warn";
       const color = warn ? G.warn : G[dv.kind];
       const mats = [];
       rec.body.forEach(o => {

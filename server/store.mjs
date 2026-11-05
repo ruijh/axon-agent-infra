@@ -11,8 +11,17 @@ import { ApiError, nowIso } from "./util.mjs";
 
 /** 演示种子版本只描述首次初始化内容；升级绝不以种子覆盖业务数据。 */
 const SEED_VERSION = "0.95.2";
-const SCHEMA_VERSION = 1;
-const DATA_TABLES = ["objects", "agents", "tasks", "sandboxes", "ops", "events", "api_keys", "idempotency"];
+const SCHEMA_VERSION = 2;
+const DATA_TABLES = [
+  "objects",
+  "agents",
+  "tasks",
+  "sandboxes",
+  "ops",
+  "events",
+  "api_keys",
+  "idempotency",
+];
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta        (key TEXT PRIMARY KEY, value TEXT);
@@ -32,13 +41,17 @@ CREATE INDEX IF NOT EXISTS idx_events_subject ON events(subject);
 
 export class Store {
   constructor(file) {
-    if (dirname(file) !== "." && !existsSync(dirname(file))) mkdirSync(dirname(file), { recursive: true });
+    if (dirname(file) !== "." && !existsSync(dirname(file)))
+      mkdirSync(dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
     this.file = file;
     try {
       this.db.exec("PRAGMA busy_timeout=5000;");
       const version = this.db.prepare("PRAGMA user_version").get().user_version;
-      if (version > SCHEMA_VERSION) throw new Error(`数据库 schema v${version} 高于程序支持的 v${SCHEMA_VERSION}，请使用匹配版本；数据未重置`);
+      if (version > SCHEMA_VERSION)
+        throw new Error(
+          `数据库 schema v${version} 高于程序支持的 v${SCHEMA_VERSION}，请使用匹配版本；数据未重置`,
+        );
       this.db.exec("PRAGMA journal_mode=WAL;");
       if (version < 1) {
         this.transaction(() => {
@@ -48,7 +61,29 @@ export class Store {
           this.db.exec("PRAGMA user_version=1;");
         });
       }
-    } catch (e) { this.db.close(); throw e; }
+      this.db.exec(
+        "CREATE TABLE IF NOT EXISTS event_journal(seq INTEGER PRIMARY KEY AUTOINCREMENT,event TEXT NOT NULL,json TEXT NOT NULL)",
+      );
+      if (version < 2)
+        this.transaction(() => {
+          const cols = this.db
+            .prepare("PRAGMA table_info(api_keys)")
+            .all()
+            .map((c) => c.name);
+          if (!cols.includes("agent_id"))
+            this.db.exec("ALTER TABLE api_keys ADD COLUMN agent_id TEXT");
+          if (!cols.includes("tenant_id"))
+            this.db.exec("ALTER TABLE api_keys ADD COLUMN tenant_id TEXT");
+          if (this.listKeys().length) this.setMeta("initialized", "true");
+          // Old global caches may contain one-time secrets. Never replay them.
+          this.db.exec(
+            "DELETE FROM idempotency WHERE response LIKE '%\"token\"%'; PRAGMA user_version=2;",
+          );
+        });
+    } catch (e) {
+      this.db.close();
+      throw e;
+    }
   }
 
   transaction(fn) {
@@ -57,113 +92,297 @@ export class Store {
       const result = fn();
       this.db.exec("COMMIT");
       return result;
-    } catch (e) { this.db.exec("ROLLBACK"); throw e; }
+    } catch (e) {
+      this.db.exec("ROLLBACK");
+      throw e;
+    }
   }
 
   /* ── 通用行 ↔ JSON ── */
   _row(table, idCol, id) {
+    if(typeof id!=="string")return null;
     return this.db.prepare(`SELECT * FROM ${table} WHERE ${idCol} = ?`).get(id);
   }
   _put(table, idCol, id, obj) {
-    this.db.prepare(`INSERT INTO ${table} (${idCol}, json) VALUES (?, ?)
-                     ON CONFLICT(${idCol}) DO UPDATE SET json = excluded.json`).run(id, JSON.stringify(obj));
+    this.db
+      .prepare(
+        `INSERT INTO ${table} (${idCol}, json) VALUES (?, ?)
+                     ON CONFLICT(${idCol}) DO UPDATE SET json = excluded.json`,
+      )
+      .run(id, JSON.stringify(obj));
   }
   _create(table, idCol, id, obj) {
-    const result = this.db.prepare(`INSERT INTO ${table} (${idCol}, json) VALUES (?, ?)
-      ON CONFLICT(${idCol}) DO NOTHING`).run(id, JSON.stringify(obj));
-    if (!result.changes) throw new ApiError(409, "SOURCE_CONFLICT", `对象 ${id} 已存在，拒绝覆盖`);
+    const result = this.db
+      .prepare(
+        `INSERT INTO ${table} (${idCol}, json) VALUES (?, ?)
+      ON CONFLICT(${idCol}) DO NOTHING`,
+      )
+      .run(id, JSON.stringify(obj));
+    if (!result.changes)
+      throw new ApiError(409, "SOURCE_CONFLICT", `对象 ${id} 已存在，拒绝覆盖`);
   }
   _list(table) {
-    return this.db.prepare(`SELECT json FROM ${table}`).all().map(r => JSON.parse(r.json));
+    return this.db
+      .prepare(`SELECT json FROM ${table}`)
+      .all()
+      .map((r) => JSON.parse(r.json));
   }
   _delete(table, idCol, id) {
     this.db.prepare(`DELETE FROM ${table} WHERE ${idCol} = ?`).run(id);
   }
 
   /* ── meta ── */
-  getMeta(key) { const r = this.db.prepare("SELECT value FROM meta WHERE key = ?").get(key); return r ? r.value : null; }
+  getMeta(key) {
+    const r = this.db.prepare("SELECT value FROM meta WHERE key = ?").get(key);
+    return r ? r.value : null;
+  }
   setMeta(key, value) {
-    this.db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, String(value));
+    this.db
+      .prepare(
+        "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      )
+      .run(key, String(value));
   }
 
   /* ── API Keys ── */
   saveKey(k) {
-    this.db.prepare(`INSERT INTO api_keys (id, name, role, hash, created_at, last_used_at, revoked)
-                     VALUES (?, ?, ?, ?, ?, ?, 0)
-                     ON CONFLICT(id) DO UPDATE SET last_used_at = excluded.last_used_at, revoked = excluded.revoked`).run(k.id, k.name, k.role, k.hash, k.createdAt, k.lastUsedAt || null);
+    const result = this.db
+      .prepare(
+        `INSERT INTO api_keys (id,name,role,hash,created_at,revoked,agent_id,tenant_id)
+      VALUES (?,?,?,?,?,0,?,?) ON CONFLICT(id) DO NOTHING`,
+      )
+      .run(
+        k.id,
+        k.name,
+        k.role,
+        k.hash,
+        k.createdAt,
+        k.agentId || null,
+        k.tenantId || null,
+      );
+    if (!result.changes)
+      throw new ApiError(409, "SOURCE_CONFLICT", "密钥 ID 冲突，拒绝覆盖");
   }
+
   findKeyByHash(hash) {
-    const r = this.db.prepare("SELECT * FROM api_keys WHERE hash = ? AND revoked = 0").get(hash);
+    const r = this.db
+      .prepare("SELECT * FROM api_keys WHERE hash = ? AND revoked = 0")
+      .get(hash);
     if (!r) return null;
-    this.db.prepare("UPDATE api_keys SET last_used_at = ? WHERE id = ?").run(nowIso(), r.id);
-    return { id: r.id, name: r.name, role: r.role, createdAt: r.created_at };
+    this.db
+      .prepare("UPDATE api_keys SET last_used_at = ? WHERE id = ?")
+      .run(nowIso(), r.id);
+    return {
+      id: r.id,
+      name: r.name,
+      role: r.role,
+      createdAt: r.created_at,
+      agentId: r.agent_id,
+      tenantId: r.tenant_id,
+    };
   }
   listKeys() {
-    return this.db.prepare("SELECT id, name, role, created_at, last_used_at, revoked FROM api_keys ORDER BY created_at").all()
-      .map(r => ({ id: r.id, name: r.name, role: r.role, createdAt: r.created_at, lastUsedAt: r.last_used_at, revoked: !!r.revoked }));
+    return this.db
+      .prepare(
+        "SELECT id, name, role, created_at, last_used_at, revoked, agent_id, tenant_id FROM api_keys ORDER BY created_at",
+      )
+      .all()
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        role: r.role,
+        createdAt: r.created_at,
+        lastUsedAt: r.last_used_at,
+        revoked: !!r.revoked,
+        agentId: r.agent_id,
+        tenantId: r.tenant_id,
+      }));
   }
-  revokeKey(id) { this.db.prepare("UPDATE api_keys SET revoked = 1 WHERE id = ?").run(id); }
+  revokeKey(id) {
+    this.db.prepare("UPDATE api_keys SET revoked = 1 WHERE id = ?").run(id);
+  }
 
   /* ── 目录对象：server / rack / netdevice / netlink / infra / model / tool / route / tenant ── */
-  objects(kind) { return this._list("objects").filter(o => o._kind === kind); }
-  object(id) { const r = this._row("objects", "id", id); return r ? JSON.parse(r.json) : null; }
-  putObject(kind, obj) { this._put("objects", "id", obj.id, { ...obj, _kind: kind }); }
-  get servers() { return this.objects("server"); }
-  get infra() { return this.objects("infra"); }
-  get models() { return this.objects("model"); }
-  get tools() { return this.objects("tool"); }
-  get routes() { return this.objects("route"); }
-  get tenants() { return this.objects("tenant"); }
-  tenant(id) { return this.object(id); }
+  objects(kind) {
+    return this._list("objects").filter((o) => o._kind === kind);
+  }
+  object(id) {
+    const r = this._row("objects", "id", id);
+    return r ? JSON.parse(r.json) : null;
+  }
+  putObject(kind, obj) {
+    const old = this.object(obj.id);
+    if (old && old._kind !== kind)
+      throw new ApiError(409, "SOURCE_CONFLICT", "对象类型不可更改");
+    this._put("objects", "id", obj.id, { ...obj, _kind: kind });
+  }
+  get servers() {
+    return this.objects("server");
+  }
+  get infra() {
+    return this.objects("infra");
+  }
+  get models() {
+    return this.objects("model");
+  }
+  get tools() {
+    return this.objects("tool");
+  }
+  get routes() {
+    return this.objects("route");
+  }
+  get tenants() {
+    return this.objects("tenant");
+  }
+  tenant(id) {
+    const o = this.object(id);
+    return o?._kind === "tenant" ? o : null;
+  }
 
   /* ── Agent（目录种子 + 运行时注册共用一张表）── */
-  agents() { return this._list("agents"); }
-  agent(id) { const r = this._row("agents", "id", id); return r ? JSON.parse(r.json) : null; }
-  putAgent(a) { this._put("agents", "id", a.id, a); }
+  agents() {
+    return this._list("agents");
+  }
+  agent(id) {
+    const r = this._row("agents", "id", id);
+    return r ? JSON.parse(r.json) : null;
+  }
+  putAgent(a) {
+    this._put("agents", "id", a.id, a);
+  }
 
   /* ── Task ── */
-  tasks() { return this._list("tasks").sort((a, b) => (a.id < b.id ? 1 : -1)); }
-  task(id) { const r = this._row("tasks", "id", id); return r ? JSON.parse(r.json) : null; }
-  createTask(t) { this._create("tasks", "id", t.id, t); }
-  putTask(t) { this._put("tasks", "id", t.id, t); }
+  tasks() {
+    return this._list("tasks").sort((a, b) => (a.id < b.id ? 1 : -1));
+  }
+  task(id) {
+    const r = this._row("tasks", "id", id);
+    return r ? JSON.parse(r.json) : null;
+  }
+  createTask(t) {
+    this._create("tasks", "id", t.id, t);
+  }
+  putTask(t) {
+    this._put("tasks", "id", t.id, t);
+  }
 
   /* ── Sandbox ── */
-  sandboxes() { return this._list("sandboxes").sort((a, b) => (a.id < b.id ? -1 : 1)); }
-  sandbox(id) { const r = this._row("sandboxes", "id", id); return r ? JSON.parse(r.json) : null; }
-  putSandbox(x) { this._put("sandboxes", "id", x.id, x); }
-  deleteSandbox(id) { this._delete("sandboxes", "id", id); }
+  sandboxes() {
+    return this._list("sandboxes").sort((a, b) => (a.id < b.id ? -1 : 1));
+  }
+  sandbox(id) {
+    const r = this._row("sandboxes", "id", id);
+    return r ? JSON.parse(r.json) : null;
+  }
+  createSandbox(x) {
+    this._create("sandboxes", "id", x.id, x);
+  }
+  putSandbox(x) {
+    this._put("sandboxes", "id", x.id, x);
+  }
+  deleteSandbox(id) {
+    this._delete("sandboxes", "id", id);
+  }
 
   /* ── Ops（SPEC §4.3 三段式）── */
-  ops() { return this._list("ops").sort((a, b) => (a.opId < b.opId ? 1 : -1)); }
-  op(opId) { const r = this._row("ops", "op_id", opId); return r ? JSON.parse(r.json) : null; }
-  createOp(o) { this._create("ops", "op_id", o.opId, o); }
-  putOp(o) { this._put("ops", "op_id", o.opId, o); }
+  ops() {
+    return this._list("ops").sort((a, b) => (a.opId < b.opId ? 1 : -1));
+  }
+  op(opId) {
+    const r = this._row("ops", "op_id", opId);
+    return r ? JSON.parse(r.json) : null;
+  }
+  createOp(o) {
+    this._create("ops", "op_id", o.opId, o);
+  }
+  putOp(o) {
+    this._put("ops", "op_id", o.opId, o);
+  }
 
   /* ── Events（§8.1 信封）── */
   pushEvent(e) {
-    const row = { ts: nowIso(), kind: e.kind || "policy", type: e.type, severity: e.severity || "info",
-      source: e.source || "axon", subject: e.subject || "", msg: e.msg, refs: JSON.stringify(e.refs || []) };
-    const r = this.db.prepare(
-      `INSERT INTO events (ts, kind, type, severity, source, subject, msg, refs) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      row.ts, row.kind, row.type, row.severity, row.source, row.subject, row.msg, row.refs);
+    const row = {
+      ts: nowIso(),
+      kind: e.kind || "policy",
+      type: e.type,
+      severity: e.severity || "info",
+      source: e.source || "axon",
+      subject: e.subject || "",
+      msg: e.msg,
+      refs: JSON.stringify(e.refs || []),
+    };
+    const r = this.db
+      .prepare(
+        `INSERT INTO events (ts, kind, type, severity, source, subject, msg, refs) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        row.ts,
+        row.kind,
+        row.type,
+        row.severity,
+        row.source,
+        row.subject,
+        row.msg,
+        row.refs,
+      );
     return { seq: Number(r.lastInsertRowid), ...row, refs: e.refs || [] };
   }
   events({ kind, subject, type, limit } = {}) {
-    let sql = "SELECT * FROM events WHERE 1=1"; const args = [];
-    if (kind) { sql += " AND kind = ?"; args.push(kind); }
-    if (subject) { sql += " AND subject = ?"; args.push(subject); }
-    if (type) { sql += " AND type = ?"; args.push(type); }
-    sql += " ORDER BY seq DESC LIMIT ?"; args.push(limit || 50);
-    return this.db.prepare(sql).all(...args).map(r => ({ ...r, refs: JSON.parse(r.refs || "[]") }));
+    let sql = "SELECT * FROM events WHERE 1=1";
+    const args = [];
+    if (kind) {
+      sql += " AND kind = ?";
+      args.push(kind);
+    }
+    if (subject) {
+      sql += " AND subject = ?";
+      args.push(subject);
+    }
+    if (type) {
+      sql += " AND type = ?";
+      args.push(type);
+    }
+    sql += " ORDER BY seq DESC LIMIT ?";
+    args.push(limit || 50);
+    return this.db
+      .prepare(sql)
+      .all(...args)
+      .map((r) => ({ ...r, refs: JSON.parse(r.refs || "[]") }));
+  }
+
+  queueFrame(event, data) {
+    this.db
+      .prepare("INSERT INTO event_journal(event,json) VALUES (?,?)")
+      .run(event, JSON.stringify(data));
+    this.db.exec(
+      "DELETE FROM event_journal WHERE seq <= (SELECT MAX(seq)-10000 FROM event_journal)",
+    );
+  }
+  framesSince(seq) {
+    return this.db
+      .prepare(
+        "SELECT * FROM event_journal WHERE seq>? ORDER BY seq LIMIT 1000",
+      )
+      .all(seq);
+  }
+  lastFrame() {
+    return this.db
+      .prepare("SELECT COALESCE(MAX(seq),0) AS seq FROM event_journal")
+      .get().seq;
   }
 
   /* ── Idempotency（§9.2）── */
   saveIdempotent(key, requestHash, response) {
-    this.db.prepare("INSERT OR REPLACE INTO idempotency (key, request_hash, response, created_at) VALUES (?, ?, ?, ?)")
+    this.db
+      .prepare(
+        "INSERT OR REPLACE INTO idempotency (key, request_hash, response, created_at) VALUES (?, ?, ?, ?)",
+      )
       .run(key, requestHash, JSON.stringify(response), nowIso());
   }
   findIdempotent(key, requestHash) {
-    const r = this.db.prepare("SELECT * FROM idempotency WHERE key = ?").get(key);
+    const r = this.db
+      .prepare("SELECT * FROM idempotency WHERE key = ?")
+      .get(key);
     if (!r) return null;
     if (r.request_hash !== requestHash) return { conflict: true };
     return { conflict: false, response: JSON.parse(r.response) };
@@ -176,47 +395,73 @@ export class Store {
       ["op", "ops", "op_id", /^OP-(\d+)$/, 4822],
     ]) {
       let next = floor;
-      for (const row of this.db.prepare(`SELECT ${col} AS id FROM ${table}`).all()) {
+      for (const row of this.db
+        .prepare(`SELECT ${col} AS id FROM ${table}`)
+        .all()) {
         const match = pattern.exec(row.id);
         if (match) {
           const n = Number(match[1]);
-          if (!Number.isSafeInteger(n + 1)) throw new Error(`历史编号超出安全整数范围：${row.id}`);
+          if (!Number.isSafeInteger(n + 1))
+            throw new Error(`历史编号超出安全整数范围：${row.id}`);
           next = Math.max(next, n + 1);
         }
       }
-      this.db.prepare(`INSERT INTO sequences (name, next_value) VALUES (?, ?)
-        ON CONFLICT(name) DO UPDATE SET next_value = MAX(sequences.next_value, excluded.next_value)`).run(name, next);
+      this.db
+        .prepare(
+          `INSERT INTO sequences (name, next_value) VALUES (?, ?)
+        ON CONFLICT(name) DO UPDATE SET next_value = MAX(sequences.next_value, excluded.next_value)`,
+        )
+        .run(name, next);
     }
   }
   _nextSeq(name) {
-    const row = this.db.prepare(`UPDATE sequences SET next_value = next_value + 1
-      WHERE name = ? AND next_value < 9007199254740991 RETURNING next_value - 1 AS value`).get(name);
+    const row = this.db
+      .prepare(
+        `UPDATE sequences SET next_value = next_value + 1
+      WHERE name = ? AND next_value < 9007199254740991 RETURNING next_value - 1 AS value`,
+      )
+      .get(name);
     if (!row) throw new Error(`序列 ${name} 缺失或已耗尽`);
     return row.value;
   }
-  nextTaskSeq() { return this._nextSeq("task"); }
-  nextOpSeq() { return this._nextSeq("op"); }
+  nextTaskSeq() {
+    return this._nextSeq("task");
+  }
+  nextOpSeq() {
+    return this._nextSeq("op");
+  }
 
   /* ── 播种只用于全新空库；结构迁移独立于演示种子版本 ── */
   seedIfEmpty() {
     return this.transaction(() => {
-      if (this.getMeta("seeded") !== null || this.getMeta("seedVersion") !== null) return false;
+      if (
+        this.getMeta("seeded") !== null ||
+        this.getMeta("seedVersion") !== null
+      )
+        return false;
       // 缺少 meta 的历史库/部分导入库也不能当空库覆盖。
-      if (DATA_TABLES.some(t => this.db.prepare(`SELECT 1 FROM ${t} LIMIT 1`).get())) return false;
+      if (
+        DATA_TABLES.some((t) =>
+          this.db.prepare(`SELECT 1 FROM ${t} LIMIT 1`).get(),
+        )
+      )
+        return false;
       const w = seedWorld();
-      w.servers.forEach(x => this.putObject("server", x));
-      w.racks.forEach(x => this.putObject("rack", x));
-      w.netDevices.forEach(x => this.putObject("netdevice", x));
-      w.netLinks.forEach((x, i) => this.putObject("netlink", { id: `link-${i + 1}`, ...x }));
-      w.infra.forEach(x => this.putObject("infra", x));
-      w.models.forEach(x => this.putObject("model", x));
-      w.tools.forEach(x => this.putObject("tool", x));
-      w.routes.forEach(x => this.putObject("route", x));
-      w.tenants.forEach(x => this.putObject("tenant", x));
-      w.agents.forEach(a => this.putAgent(a));
-      w.tasks.forEach(t => this.createTask({ ...t, createdAt: nowIso() }));
-      w.sandboxes.forEach(x => this.putSandbox(x));
-      w.events.forEach(e => this.pushEvent(e));
+      w.servers.forEach((x) => this.putObject("server", x));
+      w.racks.forEach((x) => this.putObject("rack", x));
+      w.netDevices.forEach((x) => this.putObject("netdevice", x));
+      w.netLinks.forEach((x, i) =>
+        this.putObject("netlink", { id: `link-${i + 1}`, ...x }),
+      );
+      w.infra.forEach((x) => this.putObject("infra", x));
+      w.models.forEach((x) => this.putObject("model", x));
+      w.tools.forEach((x) => this.putObject("tool", x));
+      w.routes.forEach((x) => this.putObject("route", x));
+      w.tenants.forEach((x) => this.putObject("tenant", x));
+      w.agents.forEach((a) => this.putAgent(a));
+      w.tasks.forEach((t) => this.createTask({ ...t, createdAt: nowIso() }));
+      w.sandboxes.forEach((x) => this.putSandbox(x));
+      w.events.forEach((e) => this.pushEvent(e));
       this.setMeta("seeded", nowIso());
       this.setMeta("seedVersion", SEED_VERSION);
       this.setMeta("version", "0.95.0");

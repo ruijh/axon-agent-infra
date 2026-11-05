@@ -201,10 +201,11 @@ test("v0 migration preserves every existing record and advances past legacy IDs"
     store.db.close(); store = null;
     store = new Store(file);
     assert.equal(store.seedIfEmpty(), false);
-    assert.deepEqual(snapshot(store), before);
+    const migrated=snapshot(store);migrated.meta=migrated.meta.filter(r=>r.key!=='initialized');
+    assert.deepEqual(migrated,before);assert.equal(store.getMeta('initialized'),'true');
     assert.equal(store.nextTaskSeq(), 10000);
     assert.equal(store.nextOpSeq(), 12346);
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 1);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 2);
   } finally { store?.db.close(); fixture.clean(); }
 });
 
@@ -280,13 +281,13 @@ test("newer database schemas are rejected without resetting data", () => {
     const store = new Store(file);
     store.seedIfEmpty();
     const before = snapshot(store);
-    store.db.exec("PRAGMA user_version=2;");
+    store.db.exec("PRAGMA user_version=3;");
     store.db.close();
     assert.throws(() => new Store(file), /高于程序支持/);
     const db = new DatabaseSync(file);
     try {
       assert.deepEqual(snapshot({ db }), before);
-      assert.equal(db.prepare("PRAGMA user_version").get().user_version, 2);
+      assert.equal(db.prepare("PRAGMA user_version").get().user_version, 3);
     } finally { db.close(); }
   } finally { fixture.clean(); }
 });

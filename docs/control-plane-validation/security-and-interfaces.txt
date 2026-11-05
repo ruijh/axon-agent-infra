@@ -1,0 +1,30 @@
+✔ bootstrap remains closed after every key is revoked and never caches secrets (78.1454ms)
+✔ key and sandbox collisions reject overwrites, preserving revocation and existing ownership (12.4271ms)
+✔ machine keys are bound to an Agent and tenant on every machine endpoint (95.2978ms)
+✔ bad schema and wrong-kind references cannot alter directory or quotas (66.0438ms)
+✔ human resolution needs evidence; approve requires waiting state and records actual principal (65.0164ms)
+✔ fast task completion cannot retroactively invalidate its claim receipt (644.9272ms)
+✔ execution rechecks maintenance preconditions; draining prevents new work (2086.9919ms)
+✔ pending execution, verification and task recovery resume from durable checkpoints (4966.0661ms)
+✔ revoked SSE sessions terminate immediately (55.3136ms)
+[api] 未预期错误: Error: injected storage failure
+    at f.s.store.saveIdempotent (file:///E:/Agent%20Infra%20Pilot/tests/control-security.test.mjs:350:13)
+    at run (file:///E:/Agent%20Infra%20Pilot/server/api.mjs:1040:23)
+    at Store.transaction (file:///E:/Agent%20Infra%20Pilot/server/store.mjs:92:22)
+    at handle (file:///E:/Agent%20Infra%20Pilot/server/api.mjs:1046:24)
+    at Server.<anonymous> (file:///E:/Agent%20Infra%20Pilot/server/index.mjs:77:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+✔ transaction failure rolls back sandbox quota, event journal and idempotency response (57.1588ms)
+✔ idempotency cache is scoped to the authenticated principal (76.8115ms)
+✔ SSE resumes committed events after a reconnect cursor (32.5907ms)
+✔ a real killed process resumes accepted work without losing its checkpoint (2555.3072ms)
+✔ MCP rejects malformed frames and remains available for the next request (62.2132ms)
+✔ actual Worker completes a task using only a bound machine credential (423.6415ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10950.9474

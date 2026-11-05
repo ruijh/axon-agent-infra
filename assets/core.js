@@ -180,7 +180,7 @@ setInterval(() => {
 
   // 指标随机漫步
   k.token24h = +(k.token24h + rnd(0.002, 0.012)).toFixed(3);
-  k.liveTasks = D.tasks.filter(t => !["succeeded"].includes(t.state)).length;
+  k.liveTasks = D.tasks.filter(t => !["succeeded","failed","cancelled"].includes(t.state)).length;
   D.charts.latency.push(clamp(D.charts.latency[D.charts.latency.length - 1] + rnd(-0.18, 0.2), 1.2, 3.6));
   D.charts.latency.shift();
   D.models[0].p95 = D.charts.latency[D.charts.latency.length - 1].toFixed(1);

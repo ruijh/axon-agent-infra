@@ -500,7 +500,7 @@ AXON_DATA.workload = function (srvId) {
   const agents = this.agents.filter(a =>
     svcIds.has(a.runtime) || a.models.some(m => svcIds.has(m)) ||
     a.tools.some(t => svcIds.has(t)) || a.stores.some(s => svcIds.has(s)));
-  const tasks = this.tasks.filter(t => agents.some(a => a.id === t.agent) && t.state !== "succeeded");
+  const tasks = this.tasks.filter(t => agents.some(a => a.id === t.agent) && !["succeeded","failed","cancelled"].includes(t.state));
   const nonInt = tasks.filter(t => t.interruptible === false);
   return { svc, agents, tasks, nonInt };
 };

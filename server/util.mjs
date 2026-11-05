@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 /* ═══════════════════════════════════════════════════════════
    AXON · 控制平面公共工具：错误 / 时间 / 编号
    ═══════════════════════════════════════════════════════════ */
@@ -15,9 +16,14 @@ export class ApiError extends Error {
 export const nowIso = () => new Date().toISOString();
 
 export const hhmmss = (d = new Date()) =>
-  [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2, "0")).join(":");
+  [d.getHours(), d.getMinutes(), d.getSeconds()]
+    .map((n) => String(n).padStart(2, "0"))
+    .join(":");
 
-const randHex = (n) => Array.from({ length: n }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");
+const randHex = (n) =>
+  randomBytes(Math.ceil(n / 2))
+    .toString("hex")
+    .slice(0, n);
 
 /** 任务编号：T{yyww}-{序号}（SPEC §1.1） */
 export function newTaskId(seq) {
@@ -28,10 +34,10 @@ export function newTaskId(seq) {
 }
 
 export const newOpId = (seq) => `OP-${seq}`;
-export const newSbxId = () => `sbx-${randHex(4)}`;
-export const newCpId = () => `cp-${randHex(4)}`;
-export const newToken = () => `axk_${randHex(24)}`;
-export const newKeyId = () => `K-${randHex(4).toUpperCase()}`;
+export const newSbxId = () => `sbx-${randHex(24)}`;
+export const newCpId = () => `cp-${randHex(24)}`;
+export const newToken = () => `axk_${randHex(64)}`;
+export const newKeyId = () => `K-${randHex(24).toUpperCase()}`;
 
 export function weekOf(d = new Date()) {
   const jan1 = new Date(d.getFullYear(), 0, 1);

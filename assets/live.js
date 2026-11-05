@@ -27,7 +27,7 @@
     return { status: res.status, ok: res.ok, json };
   }
 
-  const errText = (r) => r.json?.error ? `${r.json.error.code}：${r.json.error.message}` : `HTTP ${r.status}`;
+  const errText = (r) => r.json?.error ? esc(`${r.json.error.code}：${r.json.error.message}`) : `HTTP ${r.status}`;
 
   /* ── 状态徽标（与演示世界同语义）────────────────────── */
   const STATE_TXT = {
@@ -199,9 +199,11 @@
       r.ok ? AXON.toast("恢复中", `${taskId} 自检查点恢复`, "ok") : AXON.toast("恢复被拒", errText(r), "err", 5200);
       renderTasks();
     } else if (action === "人工核对通过") {
-      const r = await api("POST", `/api/v1/tasks/${taskId}/result`, { status: "succeeded", summary: "Live 控制台人工核对确认" });
-      r.ok ? AXON.toast("核对完成", `${taskId} → succeeded`, "ok") : AXON.toast("操作被拒", errText(r), "err", 5200);
-      renderTasks();
+      AXON.confirm({title:'人工核对 '+taskId,html:'<label>核对证据（业务查询编号）<input class="input" id="resolution-evidence"></label>',okText:'确认核对',onOk:async()=>{
+        const evidence=$('#resolution-evidence').value.trim();
+        const r=await api('POST',`/api/v1/tasks/${taskId}/resolve`,{status:'succeeded',evidence});
+        r.ok?AXON.toast('核对完成',esc(taskId),'ok'):AXON.toast('操作被拒',errText(r),'err');renderTasks();
+      }});
     } else if (action === "取消") {
       AXON.confirm({
         title: `取消 ${taskId}`, html: "任务产物将按保留策略归档。", okText: "确认取消", danger: true,
@@ -295,6 +297,7 @@
     } catch { LIVE.connected = false; LIVE.meta = null; }
 
     if (LIVE.connected) {
+      window.AXON_LIVE_SIM?.stop();LIVE.evtItems=[];
       renderConn();
       renderAgents(); renderTasks(); renderOps(); connectSse();
       const d = $("#live-task-dot"); if (d) d.hidden = false;
@@ -322,6 +325,7 @@
 
   /* 模拟引擎事件 → 与真实 SSE 相同的呈现路径 */
   function handleSimEvent(evt) {
+    if(LIVE.mode!=="sim")return;
     if (evt.kind === "op" && evt.op) {
       const d = $("#live-evt-dot"); if (d) d.hidden = false;
       pushFeed({ ts: evt.op.ts, tag: "操作", cls: "info",
@@ -345,7 +349,7 @@
 
   AXON.on("view", (v) => {
     if (v === "live") activate();
-    else { stopTimers(); disconnectSse(); }
+    else { stopTimers(); disconnectSse(); window.AXON_LIVE_SIM?.stop(); }
   });
 
   /* 顶栏 LIVE 徽标（真实=绿 / 模拟=琥珀；不影响演示模式其余部分） */

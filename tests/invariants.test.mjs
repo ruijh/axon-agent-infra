@@ -148,7 +148,7 @@ test("状态机：审批（授权重检）waiting_approval → running，记录�
   const r = await call("POST", "api/v1/tasks/T26-0731/approve", { approvedBy: "安全风控 · 周麟" });
   assert.equal(r.status, 200);
   assert.equal(r.json.state, "running");
-  assert.equal(r.json.approvedBy, "安全风控 · 周麟");
+  assert.equal(r.json.approvedBy, "test-admin");
 });
 
 test("状态机：不可中断任务取消需 force 二次确认（412 → 200）", async () => {
@@ -164,7 +164,7 @@ test("状态机：不可中断任务取消需 force 二次确认（412 → 200�
 test("状态机（S12）：结果未知 → 人工核对确认 → succeeded，禁止重放", async () => {
   const q = await call("GET", "api/v1/tasks");
   assert.equal(q.json.find(t => t.id === "T26-0677").state, "unknown");
-  const r = await call("POST", "api/v1/tasks/T26-0677/result", { status: "succeeded", summary: "人工核对：ERP 写入已确认（幂等键证据）" });
+  const r = await call("POST", "api/v1/tasks/T26-0677/resolve", { evidence:"业务查询凭据", status: "succeeded", summary: "人工核对：ERP 写入已确认（幂等键证据）" });
   assert.equal(r.status, 200);
   assert.equal(r.json.state, "succeeded");
 });
@@ -243,7 +243,7 @@ test("沙箱对账：漂移实例收敛并产生 RECONCILE_DIFF 事件", async (
 
 test("GC 保护（S05）：在途任务关联实例跳过回收，孤立/已终态实例回收", async () => {
   // 场景构造：一个挂在运行中任务下的过期实例（应受保护），一个无主过期实例（应回收）
-  const prot = await call("POST", "api/v1/sandboxes", { tenant: "platform", ownerTask: "T26-0712", leaseMin: 0 });
+  const prot = await call("POST", "api/v1/sandboxes", { tenant: "customer-svc", ownerTask: "T26-0712", leaseMin: 0 });
   const orphan = await call("POST", "api/v1/sandboxes", { tenant: "platform", leaseMin: 0 });
   assert.equal(prot.status, 201);
   assert.equal(orphan.status, 201);

@@ -20,7 +20,7 @@ node server/index.mjs            # 零 npm 依赖，同时提供 UI 与 /api/v1�
 # 浏览器访问 http://127.0.0.1:8437/  → 侧栏「接入面 · Live」
 
 node cli.mjs setup               # 首次初始化：创建根密钥（token 仅显示一次）
-node cli.mjs keys create worker agent          # 为 Worker 创建 agent 角色密钥
+node cli.mjs keys create worker agent ag-live-01 platform          # 为 Worker 创建 agent 角色密钥
 AXON_API_KEY=<agent密钥> node worker/worker.mjs   # 启动接入演示 Agent（心跳/认领/审批门/终态）
 ```
 在 Live 视图填入 root 密钥后即可：创建任务 → 观察 Worker 认领 → 审批续跑 → 三段式操作记录 → SSE 实时事件。
@@ -33,7 +33,7 @@ python _serve.py        # 仅公开运行时资源，默认绑定 127.0.0.1:8437
 **测试（SPEC 硬约束的可执行验证）：**
 ```bash
 node --test tests/invariants.test.mjs    # 19 项：451 能力门控 / 409 状态机 / 412 维护前置 / 429 配额 / 幂等 / 权重恒等 100 / GC 保护…
-node --test tests/hardening.test.mjs tests/invariants.test.mjs tests/scene-quality.test.mjs tests/topology.test.mjs  # 全套 52 项；静态 Python 服务回归需要 Python 3
+node --test tests/hardening.test.mjs tests/invariants.test.mjs tests/scene-quality.test.mjs tests/topology.test.mjs tests/control-security.test.mjs tests/interfaces.test.mjs  # 全套 67 项；静态 Python 服务回归需要 Python 3
 ```
 
 ### 静态资源边界与数据升级
@@ -158,3 +158,15 @@ blender --background --factory-startup --python tools/build_dc_model.py   # ② 
 - 图表全部 Canvas 手绘（吞吐面积图 / 租户配额柱状 / 延迟折线），拓扑图支持悬停高亮上下游
 - 尊重 `prefers-reduced-motion`；键盘 Esc 关闭抽屉/模态；窄屏自适应降级
 - MCP 接入示例：`claude mcp add axon -e AXON_URL=http://127.0.0.1:8437 -e AXON_API_KEY=axk_xxx -- node mcp/server.mjs`
+
+
+### 安全边界与可恢复执行（本轮迭代）
+
+- 数据库升级至 schema v2，增加机器密钥的 Agent/租户绑定；已有对象、操作与序列保留。旧机器密钥无绑定信息时拒绝使用，需要管理员按 `keys create <name> agent <agentId> <tenantId>` 重新签发。管理员密钥继续有效。
+- 初始化标记独立于密钥撤销。全部密钥撤销后不重新开放 HTTP 初始化；本地恢复：先停止控制平面并备份数据库，再执行 `node tools/recover-admin.mjs [数据库路径]`；Token 仅输出一次。初始化和密钥创建不接受幂等响应缓存；迁移清除旧缓存中的一次性密钥响应。
+- 普通机器回报不能关闭 unknown 任务。人工核对使用 `POST /api/v1/tasks/:id/resolve`，需要审批权限以及 `{status:"succeeded"|"failed",evidence:"业务查询凭据"}`；审计身份来自鉴权主体。审批只允许 waiting_approval 来源。
+- 业务写入与幂等结果在同一 SQLite 事务提交；沙箱创建拒绝覆盖，配额同步回滚。维护执行前重查前置条件，排空与维护状态在任务创建、认领、队列和沙箱调度入口生效。
+- 操作执行、验证和任务恢复使用持久化检查点；重启接续 accepted/executed/recovering。当前动作是本地 SQLite 模拟控制动作，其资源修改与阶段检查点原子提交；接入外部执行器时必须实现幂等执行/对账，不能直接假定具有同一事务保证。
+- SSE 使用持久化事件日志和 Last-Event-ID，保留最近 10000 条；过期游标返回 409，需要客户端重新读取快照。慢连接和已撤销密钥的连接被关闭。事件内容与业务写入一起提交。
+- Worker 支持 `AXON_TENANT`（默认 platform）；实例的认领尝试使用独立编号，避免两个实例共享认领幂等响应。网络调用有超时，队列短暂断连重试。机器密钥不具备创建任务权限。
+- 回归：`node --test tests/*.test.mjs`。新增覆盖身份隔离、撤权、类型混淆、碰撞、输入校验、核对证据、事务故障、幂等作用域、SSE 补发、维护竞态及真实进程被终止后的恢复。
