@@ -1,0 +1,197 @@
+{
+  "responsive": [
+    {
+      "overflow": [],
+      "pageWidth": 1440,
+      "racks": [
+        {
+          "id": "R01",
+          "width": 320
+        },
+        {
+          "id": "R02",
+          "width": 320
+        },
+        {
+          "id": "R03",
+          "width": 320
+        },
+        {
+          "id": "R04",
+          "width": 320
+        },
+        {
+          "id": "R05",
+          "width": 320
+        },
+        {
+          "id": "R06",
+          "width": 320
+        }
+      ],
+      "viewScroll": 1348,
+      "viewWidth": 1348,
+      "viewport": 1440
+    },
+    {
+      "overflow": [],
+      "pageWidth": 1280,
+      "racks": [
+        {
+          "id": "R01",
+          "width": 320
+        },
+        {
+          "id": "R02",
+          "width": 320
+        },
+        {
+          "id": "R03",
+          "width": 320
+        },
+        {
+          "id": "R04",
+          "width": 320
+        },
+        {
+          "id": "R05",
+          "width": 320
+        },
+        {
+          "id": "R06",
+          "width": 320
+        }
+      ],
+      "viewScroll": 1188,
+      "viewWidth": 1188,
+      "viewport": 1280
+    },
+    {
+      "overflow": [],
+      "pageWidth": 1024,
+      "racks": [
+        {
+          "id": "R01",
+          "width": 320
+        },
+        {
+          "id": "R02",
+          "width": 320
+        },
+        {
+          "id": "R03",
+          "width": 320
+        },
+        {
+          "id": "R04",
+          "width": 320
+        },
+        {
+          "id": "R05",
+          "width": 320
+        },
+        {
+          "id": "R06",
+          "width": 320
+        }
+      ],
+      "viewScroll": 932,
+      "viewWidth": 932,
+      "viewport": 1024
+    },
+    {
+      "overflow": [],
+      "pageWidth": 853,
+      "racks": [
+        {
+          "id": "R02",
+          "width": 320
+        }
+      ],
+      "viewScroll": 761,
+      "viewWidth": 761,
+      "viewport": 853
+    },
+    {
+      "overflow": [],
+      "pageWidth": 640,
+      "racks": [
+        {
+          "id": "R02",
+          "width": 320
+        }
+      ],
+      "viewScroll": 580,
+      "viewWidth": 580,
+      "viewport": 640
+    },
+    {
+      "overflow": [],
+      "pageWidth": 420,
+      "racks": [
+        {
+          "id": "R02",
+          "width": 314
+        }
+      ],
+      "viewScroll": 360,
+      "viewWidth": 360,
+      "viewport": 420
+    },
+    {
+      "overflow": [],
+      "pageWidth": 375,
+      "racks": [
+        {
+          "id": "R02",
+          "width": 269
+        }
+      ],
+      "viewScroll": 315,
+      "viewWidth": 315,
+      "viewport": 375
+    }
+  ],
+  "themes": [
+    {
+      "count": 26,
+      "overflow": 0,
+      "theme": "axon"
+    },
+    {
+      "count": 26,
+      "overflow": 0,
+      "theme": "google"
+    },
+    {
+      "count": 26,
+      "overflow": 0,
+      "theme": "spacex"
+    },
+    {
+      "count": 26,
+      "overflow": 0,
+      "theme": "aws"
+    },
+    {
+      "count": 26,
+      "overflow": 0,
+      "theme": "openai"
+    },
+    {
+      "count": 26,
+      "overflow": 0,
+      "theme": "light"
+    },
+    {
+      "count": 26,
+      "overflow": 0,
+      "theme": "dark"
+    },
+    {
+      "count": 26,
+      "overflow": 0,
+      "theme": "macos"
+    }
+  ]
+}

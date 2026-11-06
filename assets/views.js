@@ -278,7 +278,7 @@ function renderOverview() {
 }
 
 /* ══ 服务器管理（首屏主视角）══════════════════════════════ */
-const RACK_U = 11, RACK_UNITS = 42;
+const RACK_UNITS = AXON_RACK_LAYOUT.UNITS;
 
 function renderServersTab() {
   const tab = AXON.serversTab;
@@ -298,42 +298,88 @@ $$("#servers-tabs .subtab").forEach(t => t.addEventListener("click", () => {
   renderServersTab();
 }));
 
-function rackDevBlock(m) {
+function rackDevBlock(m, pitch = AXON_RACK_LAYOUT.PITCH) {
   const ref = m.ref, [u0, u1] = ref.location.u;
-  const h = (u1 - u0 + 1) * RACK_U - 2;
-  const bottom = (u0 - 1) * RACK_U + 1;
+  const { height, bottom, units, label } = AXON_RACK_LAYOUT.device([u0, u1], pitch);
   const kindCls = m.kind === "server" ? "server" : (ref.kind === "bmc" ? "bmc" : "net");
   const short = m.kind === "server" ? ref.name.replace(" · ", " ") : (ref.short || ref.name);
   const led = ref.state === "warn" ? '<i class="led led-warn rd-led"></i>' : '<i class="led led-ok rd-led"></i>';
-  const sub = m.kind === "server"
-    ? `U${u0}–${u1} · ${esc(ref.role)}`
-    : `U${u0} · ${esc(ref.role)}`;
-  return `<div class="rack-dev ${kindCls}" style="bottom:${bottom}px;height:${h}px" data-kind="${m.kind}" data-id="${ref.id}">
-    <span class="rd-name">${led}${esc(short)}</span><span class="rd-sub">${sub}</span>
-  </div>`;
+  const full = `${ref.name} · ${ref.location.rack} ${label} · ${ref.role} · ${ref.state === 'warn' ? '预警' : '正常'}`;
+  const sub = `${label} · ${ref.role.split(' · ')[0]}`;
+  return `<button type="button" class="rack-dev ${kindCls} ${units === 1 ? 'single-u' : ''}" style="bottom:${bottom}px;height:${height}px" data-kind="${m.kind}" data-id="${esc(ref.id)}" aria-label="${esc(full)}" title="${esc(full)}">
+    <span class="rd-name">${led}<span class="rd-text">${esc(short)}</span>${ref.state === 'warn' ? '<span class="rd-warning">预警</span>' : ''}</span>${units > 1 ? `<span class="rd-sub">${esc(sub)}</span>` : ''}
+  </button>`;
 }
+
+function rackPicker(id, selected) {
+  return `<label class="rack-picker" for="${id}">选择机柜 <select id="${id}" class="input">${AXON_DATA.racks.map(r => `<option value="${r.id}" ${r.id === selected ? 'selected' : ''}>${esc(r.name)} · ${esc(r.note)}</option>`).join('')}</select></label>`;
+}
+
+function bindRackDevices(root) {
+  $$('.rack-dev', root).forEach(d => d.addEventListener('click', () => AXON.openRackDevice(d.dataset.id)));
+}
+
+function selectRackContext(rid) {
+  AXON.floorRack = rid;
+  const picker = $('#rack-picker');
+  if (picker) picker.value = rid;
+  $$('#servers-rack-wrap .rack').forEach(r => r.dataset.current = String(r.dataset.rack === rid));
+}
+
+AXON.openRackDevice = function (id) {
+  const ref = AXON_DATA.find(id);
+  if (!ref?.location) return;
+  selectRackContext(ref.location.rack);
+  if (AXON_DATA.servers.some(s => s.id === id)) { openServerDrawer(id); return; }
+  AXON.openDrawer(ref.name, body => {
+    body.innerHTML = `<div class="side-sec"><h4>网络设备</h4><dl class="kv">
+      <dt>设备名称</dt><dd class="plain">${esc(ref.name)}</dd>
+      <dt>型号</dt><dd class="plain">${esc(ref.model)}</dd>
+      <dt>角色</dt><dd class="plain">${esc(ref.role)}</dd>
+      <dt>管理地址</dt><dd>${esc(ref.mgmt)}</dd>
+      <dt>机柜位置</dt><dd>${esc(ref.location.rack)} · ${AXON_RACK_LAYOUT.device(ref.location.u).label}</dd>
+      <dt>健康状态</dt><dd>${ref.state === 'warn' ? '预警' : '正常'}</dd>
+    </dl></div><button type="button" class="btn" data-open-rack>定位到机柜 ${esc(ref.location.rack)}</button>`;
+    $('[data-open-rack]', body).onclick = () => { AXON.closeDrawer(); AXON.openRack(ref.location.rack); };
+  });
+};
+
+AXON.openRack = function (rid) {
+  if (!AXON_DATA.racks.some(r => r.id === rid)) return;
+  selectRackContext(rid);
+  AXON.serversTab = 'rack';
+  AXON.nav('servers');
+  const rack = $(`#servers-rack-wrap .rack[data-rack="${rid}"]`);
+  rack?.scrollIntoView({ block: 'start', behavior: 'instant' });
+  $('.rh-name', rack)?.focus({ preventScroll: true });
+};
 
 function renderRacks() {
   const D = AXON_DATA;
+  const selected = D.racks.some(r => r.id === AXON.floorRack) ? AXON.floorRack : D.racks[0].id;
+  AXON.floorRack = selected;
   $("#servers-rack-wrap").innerHTML = `
-    <div class="panel">
+    <div class="panel rack-panel">
       <div class="dc-breadcrumb">机房拓扑：<b>华东-1 · A 栋</b> — A2 机房 — 03 列 A 排（R01 网络 · R02/R03 知识库 · R04 GPU · R05 通用/存储 · R06 审计存证）· 双路 PDU 供电 · 冷热通道封闭</div>
-      <div class="rack-grid">${D.racks.map(rackColumnHtml).join("")}</div>
+      <div class="rack-controls">${rackPicker('rack-picker', selected)}<label class="rack-single-toggle"><input type="checkbox" id="rack-single" ${AXON.rackSingle ? 'checked' : ''}> 仅看所选机柜</label><span class="rack-mobile-note">窄屏显示所选机柜</span></div>
+      <div class="rack-grid ${AXON.rackSingle ? 'single' : ''}">${D.racks.map(r => rackColumnHtml(r)).join("")}</div>
       <div class="rack-note">
         图例：<i style="background:var(--l-server)"></i>服务器
         <i style="background:var(--l-catalog)"></i>网络设备（核心 / ToR）
         <i style="background:var(--violet)"></i>带外管理
-        · 悬停高亮 · 点击打开资产详情 · 空白 U 位可扩容
+        · 点击或按 Enter 查看完整详情 · 空白网格表示未占用 U 位
       </div>
     </div>`;
-  $$("#servers-rack-wrap .rack-dev").forEach(d => d.addEventListener("click", () => {
-    const id = d.dataset.id, kind = d.dataset.kind;
-    if (kind === "server") openServerDrawer(id);
-    else {
-      const n = AXON_DATA.find(id);
-      AXON.toast(n.name, `${esc(n.model)} · ${esc(n.role)} · 管理口 ${esc(n.mgmt)} · ${esc(n.location.rack)} U${n.location.u[0]}`, "info", 4200);
-    }
-  }));
+  bindRackDevices($('#servers-rack-wrap'));
+  $('#rack-picker').onchange = e => {
+    AXON.floorRack = e.target.value;
+    $$('#servers-rack-wrap .rack').forEach(r => r.dataset.current = String(r.dataset.rack === AXON.floorRack));
+    $(`#servers-rack-wrap .rack[data-rack="${AXON.floorRack}"] .rack-head`).scrollIntoView({ block: 'nearest', behavior: 'instant' });
+  };
+  $('#rack-single').onchange = e => {
+    AXON.rackSingle = e.target.checked;
+    $('#servers-rack-wrap .rack-grid').classList.toggle('single', AXON.rackSingle);
+  };
 }
 
 function rackMembers() {
@@ -352,24 +398,24 @@ function rackStats(rackId) {
 }
 
 /* 单个机柜的 U 位立柱（机柜部署 / 平面图下钻共用） */
-function rackColumnHtml(rk) {
-  const { devs, usedU } = rackStats(rk.id);
+function rackColumnHtml(rk, pitch = AXON_RACK_LAYOUT.PITCH) {
+  const { devs, usedU, hasWarn } = rackStats(rk.id);
   const marks = [1, 6, 12, 18, 24, 30, 36, 42].map(u =>
-    `<span class="rack-u-mark" style="bottom:${(u - 1) * RACK_U + 3}px">${u}</span>`).join("");
-  return `<div class="rack">
+    `<span class="rack-u-mark" style="bottom:${(u - 1) * pitch + 3}px">${u}</span>`).join("");
+  return `<section class="rack" aria-label="${esc(rk.name)} U位" data-rack="${rk.id}" data-current="${rk.id === AXON.floorRack}" style="--rack-pitch:${pitch}px;--rack-height:${pitch * RACK_UNITS}px">
     <div class="rack-head">
-      <div class="rh-name">${esc(rk.name)}</div>
+      <h3 class="rh-name" tabindex="-1">${esc(rk.name)} <span class="rack-health ${hasWarn ? 'warn' : ''}">${hasWarn ? '预警' : '正常'}</span></h3>
       <div class="rh-sub">${esc(rk.room)} · 已用 ${usedU}U / ${RACK_UNITS}U</div>
       <div class="rh-note">${esc(rk.note)}</div>
     </div>
     <div class="rack-frame">
       <div class="rack-pdu"><span>PDU-A</span></div>
       <div class="rack-body">${marks}${devs
-        .sort((a, b) => a.ref.location.u[0] - b.ref.location.u[0])
-        .map(rackDevBlock).join("")}</div>
+        .sort((a, b) => b.ref.location.u[0] - a.ref.location.u[0])
+        .map(m => rackDevBlock(m, pitch)).join("")}</div>
       <div class="rack-pdu"><span>PDU-B</span></div>
     </div>
-  </div>`;
+  </section>`;
 }
 
 /* ══ 平面布局（机房俯视图 + 机柜下钻）══════════════════ */
@@ -407,20 +453,20 @@ function renderFloor() {
         const nSrv = devs.filter(m => m.kind === "server").length;
         const nNet = devs.length - nSrv;
         const devList = devs.map(m => m.ref.name).join(" / ");
-        els.push(`<g class="fp-rack managed ${rid === sel ? "sel" : ""}" data-rack="${rid}" data-x="${F.rackX(i)}" data-y="${F.rowY[row.id]}" transform="translate(${x},${y})">
+        els.push(`<g class="fp-rack managed ${rid === sel ? "sel" : ""}" role="button" tabindex="0" aria-pressed="${rid === sel}" aria-label="${esc(rk.name)} · ${esc(rk.note)} · 已用${usedU}U · ${hasWarn ? '预警' : '正常'}" data-rack="${rid}" data-x="${F.rackX(i)}" data-y="${F.rowY[row.id]}" transform="translate(${x},${y})">
           <title>${rid} · ${esc(rk.note)}｜已用 ${usedU}U / ${RACK_UNITS}U｜${nSrv}×服务器 + ${nNet}×网络设备｜${esc(devList)}</title>
           <rect class="fp-rack-rect" width="${RW}" height="${RD}" rx="4"/>
           <g clip-path="url(#fpc-${rid})">
             <circle class="fp-led ${hasWarn ? "warn" : "ok"}" cx="14" cy="19" r="4.5"/>
             <text class="fp-rack-name" x="26" y="24">${rid}</text>
             <text class="fp-rack-unit" x="${RW - 10}" y="24" text-anchor="end">${usedU}U / ${RACK_UNITS}U</text>
-            <text class="fp-rack-note" x="10" y="43">${esc(rk.note)}</text>
-            <text class="fp-rack-sub" x="10" y="60">${nSrv}×服务器 + ${nNet}×网络设备</text>
+            <text class="fp-rack-note" x="10" y="43">${esc(rk.note.length > 10 ? rk.note.slice(0, 9) + '…' : rk.note)}</text>
+            <text class="fp-rack-sub" x="10" y="62">${nSrv} 服务器 / ${nNet} 网络</text>
           </g>
           <line class="fp-front" x1="4" y1="${RD}" x2="${RW - 4}" y2="${RD}"/>
         </g>`);
       } else {
-        els.push(`<g class="fp-rack unmanaged" data-rack="${rid}" data-x="${F.rackX(i)}" data-y="${F.rowY[row.id]}" transform="translate(${x},${y})">
+        els.push(`<g class="fp-rack unmanaged" role="img" aria-label="${rid} 未纳管" data-rack="${rid}" data-x="${F.rackX(i)}" data-y="${F.rowY[row.id]}" transform="translate(${x},${y})">
           <rect class="fp-rack-rect" width="${RW}" height="${RD}" rx="4"/>
           <text class="fp-rack-name" x="${RW / 2}" y="40" text-anchor="middle">${rid}</text>
           <text class="fp-rack-sub" x="${RW / 2}" y="56" text-anchor="middle">未纳管</text>
@@ -431,11 +477,12 @@ function renderFloor() {
   });
 
   $("#servers-floor-wrap").innerHTML = `
-    <div class="panel">
+    <div class="panel floor-panel">
       <div class="dc-breadcrumb">华东-1 · A 栋 — <b>A2 机房</b>（22×12 m · ${totalRacks} 柜，纳管 ${managed.size} 柜）— 机柜区域示意（非等比例）· 柜间净距 ${Math.round((F.rackX(1)-F.rackX(0)-F.rackSize.w)*100)} cm · 精密空调 ×4 · 悬停机柜看清单 · 点击机柜查看 U 位</div>
+      <div class="rack-controls">${rackPicker('floor-picker', sel)}<span class="dim">横向滚动查看全室 · 点击或按 Enter 查看 U 位</span></div>
       <div class="fp-layout">
-        <svg viewBox="0 0 ${W} ${H}" class="fp-svg" id="fp-svg">${els.join("")}</svg>
-        <aside class="fp-detail" id="fp-detail"></aside>
+        <div class="fp-map-scroll" tabindex="0" role="region" aria-label="机房平面图，可横向滚动"><svg viewBox="0 0 ${W} ${H}" class="fp-svg" id="fp-svg">${els.join("")}</svg></div>
+        <aside class="fp-detail" id="fp-detail" aria-label="所选机柜详情"></aside>
       </div>
       <div class="rack-note">
         图例：<i style="background:var(--cyan)"></i>已纳管机柜（青色描边 + 绿灯/预警灯）
@@ -444,26 +491,26 @@ function renderFloor() {
       </div>
     </div>`;
   renderFloorDetail(sel);
-  $$("#fp-svg .fp-rack").forEach(g => g.addEventListener("click", () => {
-    const rid = g.dataset.rack;
-    if (!managed.has(rid)) { AXON.toast("机柜未纳管", `${rid} 不在当前管理范围（示例：纳管 03 列 A 排 R01–R06，B 排预留扩容）`, "warn", 3600); return; }
-    renderFloorDetail(rid);
-  }));
+  $('#floor-picker').onchange = e => renderFloorDetail(e.target.value);
+  $$("#fp-svg .fp-rack.managed").forEach(g => {
+    g.addEventListener('click', () => renderFloorDetail(g.dataset.rack));
+    g.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); renderFloorDetail(g.dataset.rack); }
+    });
+  });
 }
 
 function renderFloorDetail(rid) {
   AXON.floorRack = rid;
-  $$("#fp-svg .fp-rack").forEach(g => g.classList.toggle("sel", g.dataset.rack === rid));
+  $$("#fp-svg .fp-rack.managed").forEach(g => {
+    g.classList.toggle("sel", g.dataset.rack === rid);
+    g.setAttribute('aria-pressed', String(g.dataset.rack === rid));
+  });
+  $('#floor-picker').value = rid;
   const rk = AXON_DATA.racks.find(r => r.id === rid);
   const detail = $("#fp-detail");
-  detail.innerHTML = rackColumnHtml(rk);
-  $$("#fp-detail .rack-dev").forEach(d => d.addEventListener("click", () => {
-    if (d.dataset.kind === "server") openServerDrawer(d.dataset.id);
-    else {
-      const n = AXON_DATA.find(d.dataset.id);
-      AXON.toast(n.name, `${esc(n.model)} · ${esc(n.role)} · 管理口 ${esc(n.mgmt)}`, "info", 4200);
-    }
-  }));
+  detail.innerHTML = rackColumnHtml(rk, AXON_RACK_LAYOUT.DETAIL_PITCH);
+  bindRackDevices(detail);
 }
 
 function meterCell(pct) {
@@ -563,6 +610,7 @@ function updateServerMeters() {
 function openServerDrawer(id) {
   const s = AXON_DATA.find(id);
   if (!s) return;
+  selectRackContext(s.location.rack);
   const wl = AXON_DATA.workload(id);
   const slotChips = s.slots.map(sl =>
     `<span class="slot-chip ${sl.state === "warn" ? "warn" : ""}" title="${esc(sl.note || "")}">
@@ -637,7 +685,7 @@ function openServerDrawer(id) {
     $$("#drawer [data-task]").forEach(ch => ch.addEventListener("click", () => { AXON.closeDrawer(); AXON.nav("tasks"); AXON.emit("task-detail", ch.dataset.task); }));
     $("#sv-maint", body).onclick = () => { AXON.closeDrawer(); AXON.nav("maint"); AXON.emit("maint-prefill", id); };
     $("#sv-impact", body).onclick = () => { AXON.closeDrawer(); AXON.nav("topo"); setTimeout(() => AXON.impact.setImpactMode(true, id), 80); };
-    $("#sv-rack", body).onclick = () => { AXON.closeDrawer(); AXON.serversTab = "rack"; AXON.nav("servers"); renderServersTab(); };
+    $("#sv-rack", body).onclick = () => { AXON.closeDrawer(); AXON.openRack(s.location.rack); };
     $("#sv-net", body).onclick = () => { AXON.closeDrawer(); AXON.serversTab = "net"; AXON.nav("servers"); renderServersTab(); };
     $("#sv-power", body).onclick = () => AXON.toast("功耗策略", `${s.name} 已切换至「性能均衡」模式 · 预计节能 8%`, "ok");
     $("#sv-led", body).onclick = () => AXON.toast("LED 定位", `${s.name} 机箱定位灯已点亮 120 秒`, "info");

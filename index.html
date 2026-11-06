@@ -104,6 +104,7 @@
               <span id="dc3d-hint" class="panel-note">拖拽环绕 · 滚轮缩放 · 点击设备查看资产</span>
             </div>
             <div class="dc3d-wrap">
+              <div class="dc3d-stage">
               <canvas id="dc3d-canvas"></canvas>
               <div class="dc3d-views" role="group" aria-label="机房视角">
                 <button class="btn tiny" data-dc-view="overview" aria-pressed="true">总览</button>
@@ -114,8 +115,9 @@
                 <button class="btn tiny" id="dc3d-door" aria-pressed="false">打开 R04 柜门</button>
               </div>
               <div id="dc3d-labels" class="dc3d-labels"></div>
-              <div class="dc3d-hud" id="dc3d-hud"></div>
               <div class="net-legend" id="dc3d-legend"></div>
+              </div>
+              <div class="dc3d-hud" id="dc3d-hud"></div>
             </div>
           </div>
         </div>
@@ -362,17 +364,17 @@
 
 <!-- ── 抽屉 / 提示 / 模态 ─────────────────────────────────── -->
 <div id="drawer-mask" hidden></div>
-<aside id="drawer" aria-hidden="true">
+<aside id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" aria-hidden="true" inert>
   <div class="drawer-head">
     <h3 id="drawer-title">详情</h3>
-    <button class="drawer-close" id="drawer-close">✕</button>
+    <button class="drawer-close" id="drawer-close" aria-label="关闭详情">✕</button>
   </div>
   <div class="drawer-body" id="drawer-body"></div>
 </aside>
 
 <div id="toasts"></div>
 <div id="modal-wrap" hidden>
-  <div class="modal" id="modal"></div>
+  <div class="modal" id="modal" role="dialog" aria-modal="true" aria-label="操作确认"></div>
 </div>
 <div id="theme-pop" hidden></div>
 
@@ -388,7 +390,9 @@
 <script src="assets/core.js"></script>
 <script src="assets/themes.js"></script>
 <script type="module" src="assets/graph.js"></script>
+<script src="assets/rack-layout.js"></script>
 <script src="assets/views.js"></script>
+<script src="assets/net-layout.js"></script>
 <script src="assets/net.js"></script>
 <script type="module" src="assets/dc3d.js"></script>
 <script type="module" src="assets/topology-ui.js"></script>

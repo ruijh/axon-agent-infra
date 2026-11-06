@@ -9,6 +9,7 @@
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
   const CV = window.AXON_CV;
+  const NL = window.AXON_NET_LAYOUT;
 
   /* 主题调色板包装：切换主题后下一次 draw 即生效 */
   const TYPE_COLOR = () => ({
@@ -29,51 +30,44 @@
     nodes.push(node); nodeMap.set(s.id, node);
   });
 
-  let W = 0, H = 0, hoverId = null, selId = null, mouse = { x: -1, y: -1 };
+  let W = 0, H = 0, hoverId = null, selId = null;
+  let rackFilter = null, initialized = false, userFiltered = false, positions = new Map();
+  const textCache = new Map();
   let particles = [];
 
   /* 按机柜分组的数据驱动布局：核心层 / 接入层（ToR + 带外）/ 服务器 2×N */
-  const ROW_Y = [52, 138, 232, 306];
   const RACK_TOR = { R02: "sw-tor-kbb", R03: "sw-tor-kbd", R04: "sw-tor-gpu", R05: "sw-tor-svc", R06: "sw-tor-aud" };
   const RACK_LABEL = { R02: "R02 · 业务知识库", R03: "R03 · 研发知识库", R04: "R04 · GPU 柜", R05: "R05 · 通用 / 存储", R06: "R06 · 审计存证" };
   const ZONE_COLORS = () => [CV.tri("l1"), CV.tri("l1"), CV.tri("l0"), CV.tri("violet"), CV.tri("warn")];
   let zones = [];
 
   function layout() {
-    const rackIds = Object.keys(RACK_TOR);
-    const L = 26, R = W - 150;
-    const bandW = Math.max(120, (R - L) / rackIds.length);
-    zones = [{ label: "R01 · 网络柜（核心）", x0: 0.24, x1: 0.76, y0: 16, y1: 84, color: CV.tri("l2") }];
-    rackIds.forEach((rid, i) => {
-      const x0 = L + bandW * i, x1 = L + bandW * (i + 1);
-      const tor = nodeMap.get(RACK_TOR[rid]);
-      if (tor) { tor.x = (x0 + x1) / 2; tor.y = ROW_Y[1]; }
-      const srvs = AXON_DATA.servers.filter(s => s.location.rack === rid);
-      const cols = srvs.length > 2 ? 2 : 1;
-      srvs.forEach((s, j) => {
-        const n = nodeMap.get(s.id);
-        if (!n) return;
-        const col = Math.floor(j / 2), row = j % 2;
-        n.x = cols === 1 ? (x0 + x1) / 2 : x0 + bandW * (col + 0.5) / cols;
-        n.y = ROW_Y[2] + row * (ROW_Y[3] - ROW_Y[2]);
-      });
-      zones.push({ label: RACK_LABEL[rid], x0: (x0 - 6) / W, x1: (x1 + 6) / W, y0: 106, y1: 350, color: ZONE_COLORS()[i] });
-    });
-    ["sw-core-01", "sw-core-02"].forEach((id, i) => {
-      const n = nodeMap.get(id);
-      if (n) { n.x = 70 + (W - 140) * (i === 0 ? 0.32 : 0.68); n.y = ROW_Y[0]; }
-    });
-    const bmc = nodeMap.get("sw-bmc");
-    if (bmc) { bmc.x = W - 78; bmc.y = ROW_Y[1]; }
+    const plan = NL.layout({width: canvas.parentElement.clientWidth, rackId: rackFilter,
+      rackIds: Object.keys(RACK_TOR), servers: AXON_DATA.servers, netDevices: AXON_DATA.netDevices});
+    W = plan.width; H = plan.height; positions = plan.positions;
+    nodes.forEach(n => { n.visible = positions.has(n.id); if (n.visible) Object.assign(n, positions.get(n.id)); });
+    zones = plan.zones.map(z => ({...z, label: z.rack === "R01" ? "R01 · 网络柜（核心）" : RACK_LABEL[z.rack],
+      color: z.rack === "R01" ? CV.tri("l2") : ZONE_COLORS()[Object.keys(RACK_TOR).indexOf(z.rack)]}));
+    textCache.clear();
   }
 
   function resize() {
-    const r = canvas.parentElement.getBoundingClientRect();
+    if (!canvas.parentElement.clientWidth) return;
+    if (!initialized) {
+      initialized = true;
+      if (canvas.parentElement.clientWidth < 900) rackFilter = AXON.floorRack || "R04";
+      renderInventory();
+    }
+    if (!userFiltered && canvas.parentElement.clientWidth < 900 && !rackFilter) {
+      rackFilter = AXON.floorRack || "R04";
+      renderInventory();
+    }
+    layout();
     const dpr = window.devicePixelRatio || 1;
-    W = r.width; H = r.height;
+    canvas.style.width = W + "px"; canvas.style.height = H + "px";
+    canvas.parentElement.style.height = (H + (W > canvas.parentElement.clientWidth ? 18 : 2)) + "px";
     canvas.width = W * dpr; canvas.height = H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    layout();
   }
 
   const related = (id) => {
@@ -83,40 +77,93 @@
   };
 
   function hitTest(x, y) {
-    for (const n of nodes) {
-      if (x >= n.x - n.w / 2 - 3 && x <= n.x + n.w / 2 + 3 && y >= n.y - n.h / 2 - 3 && y <= n.y + n.h / 2 + 3) return n.id;
-    }
-    return null;
+    return NL.hitTest(positions, x, y);
+  }
+
+  const uLabel = ref => { const [lo, hi] = ref.location.u; return lo === hi ? `U${lo}` : `U${lo}–${hi}`; };
+  const health = ref => ref.state === "warn" ? "预警" : ref.state === "maint" ? "维护中" : "正常";
+  const describe = n => `${n.ref.name} · ${n.ref.location.rack} ${uLabel(n.ref)} · ${health(n.ref)}`;
+  function setStatus(id) {
+    const st = $("#net-status"), n = nodeMap.get(id);
+    if (st) st.textContent = n ? `${describe(n)} · 打开资产详情` : "选择机柜聚焦链路 · 点击节点或下方设备查看详情";
+  }
+  function openDevice(id) {
+    if (!nodeMap.has(id)) return;
+    selId = id; setStatus(id);
+    AXON.openRackDevice(id);
+  }
+  function point(e) {
+    const r = canvas.getBoundingClientRect();
+    return {x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height};
   }
 
   canvas.addEventListener("mousemove", (e) => {
-    const r = canvas.getBoundingClientRect();
-    mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top;
-    hoverId = hitTest(mouse.x, mouse.y);
+    const p = point(e);
+    hoverId = hitTest(p.x, p.y);
     canvas.style.cursor = hoverId ? "pointer" : "default";
-    const st = $("#net-status");
-    if (st) {
-      const n = hoverId ? nodeMap.get(hoverId) : null;
-      st.textContent = n
-        ? (n.kind === "server"
-          ? `${n.ref.name} · ${n.ref.location.rack} U${n.ref.location.u[0]}–${n.ref.location.u[1]} · 点击打开资产抽屉`
-          : `${n.ref.name} · ${n.ref.model.split(" · ")[0]} · 管理口 ${n.ref.mgmt}`)
-        : "悬停节点查看详情 · 点击服务器打开资产抽屉";
-    }
+    setStatus(hoverId);
   });
-  canvas.addEventListener("click", () => {
-    if (!hoverId) return;
-    const n = nodeMap.get(hoverId);
-    selId = hoverId;
-    if (n.kind === "server") AXON.emit("server-detail", hoverId);
-    else AXON.toast(n.ref.name, `${n.ref.model} · ${n.ref.role} · 管理口 ${n.ref.mgmt}`, "info", 3600);
+  canvas.addEventListener("click", e => {
+    const p = point(e), id = hitTest(p.x, p.y);
+    if (id) openDevice(id);
+    else { selId = null; setStatus(null); }
   });
-  canvas.addEventListener("mouseleave", () => { hoverId = null; });
+  canvas.addEventListener("mouseleave", () => { hoverId = null; setStatus(selId); });
+
+  const toolbar = el("div", "net-inventory-toolbar");
+  const inventory = el("div", "net-inventory");
+  canvas.parentElement.before(toolbar); canvas.parentElement.after(inventory);
+  canvas.setAttribute("role", "img");
+  canvas.setAttribute("aria-label", "物理网络拓扑；可使用下方设备清单选择节点并打开详情");
+  canvas.parentElement.setAttribute("tabindex", "0");
+  canvas.parentElement.setAttribute("role", "region");
+  canvas.parentElement.setAttribute("aria-label", "物理网络图，可横向滚动");
+  function renderInventory() {
+    toolbar.innerHTML = `<label for="net-rack-filter">机柜范围</label>
+      <select class="btn" id="net-rack-filter"><option value="">全部机柜</option>${AXON_DATA.racks.map(r =>
+        `<option value="${esc(r.id)}" ${rackFilter === r.id ? "selected" : ""}>${esc(r.name)} · ${esc(r.note)}</option>`).join("")}</select>
+      <button class="btn ghost" id="net-open-rack" ${rackFilter ? "" : "hidden"}>查看 ${esc(rackFilter || "")} U 位</button>
+      <span class="dim">${rackFilter ? "聚焦当前机柜及其网络连接" : "完整网络图可横向滚动，选择机柜可聚焦"}</span>`;
+    const members = nodes.filter(n => !rackFilter || n.ref.location.rack === rackFilter)
+      .sort((a,b) => a.ref.location.rack.localeCompare(b.ref.location.rack) || b.ref.location.u[0] - a.ref.location.u[0]);
+    inventory.innerHTML = `<h3>设备清单 · ${members.length} 台</h3><div class="net-device-list">${members.map(n =>
+      `<button type="button" class="net-device-button" data-net-device="${esc(n.id)}" aria-label="${esc(describe(n))}，打开详情">
+        <span class="net-device-name">${esc(n.ref.name)}</span>
+        <span class="net-device-meta">${esc(n.ref.location.rack)} · ${uLabel(n.ref)} · <span data-net-state>${health(n.ref)}</span> · ${esc(n.ref.role)}</span>
+      </button>`).join("")}</div>`;
+    $("#net-rack-filter").onchange = e => {
+      rackFilter = e.target.value || null; userFiltered = true;
+      if (rackFilter) AXON.floorRack = rackFilter;
+      hoverId = selId = null; particles = []; canvas.parentElement.scrollLeft = 0;
+      renderInventory(); resize(); draw(); setStatus(null);
+      $("#net-rack-filter").focus();
+    };
+    $("#net-open-rack").onclick = () => AXON.openRack(rackFilter);
+    $$("[data-net-device]", inventory).forEach(b => {
+      b.onclick = () => openDevice(b.dataset.netDevice);
+      b.onfocus = () => { selId = b.dataset.netDevice; setStatus(selId); };
+    });
+  }
+
+  function fitted(text, width) {
+    const key = `${ctx.font}|${width}|${text}`;
+    if (!textCache.has(key)) textCache.set(key, NL.fitText(text, width, value => ctx.measureText(value).width));
+    return textCache.get(key);
+  }
+
+  function updateInventoryStates() {
+    $$("[data-net-device]", inventory).forEach(b => {
+      const n = nodeMap.get(b.dataset.netDevice);
+      $("[data-net-state]", b).textContent = health(n.ref);
+      b.setAttribute("aria-label", `${describe(n)}，打开详情`);
+    });
+  }
 
   function spawnParticles() {
     const focus = hoverId || selId;
     const rel = focus ? related(focus) : null;
     links.forEach(l => {
+      if (!positions.has(l.from) || !positions.has(l.to)) return;
       const lit = !rel || (rel.has(l.from) && rel.has(l.to));
       const rate = (l.util / 100) * (lit ? 0.10 : 0.02);
       if (Math.random() < rate) {
@@ -132,20 +179,20 @@
   function drawZones() {
     ctx.save();
     zones.forEach(z => {
-      const x = z.x0 * W, w = (z.x1 - z.x0) * W;
+      const x = z.x, w = z.w;
       ctx.strokeStyle = `rgba(${z.color},.28)`;
       ctx.fillStyle = `rgba(${z.color},.028)`;
       ctx.lineWidth = 1;
       ctx.setLineDash([6, 5]);
       ctx.beginPath();
-      ctx.roundRect(x, z.y0, w, z.y1 - z.y0, 8);
+      ctx.roundRect(x, z.y, w, z.h, 8);
       ctx.fill();
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = `rgba(${z.color},.62)`;
-      ctx.font = "9.5px Consolas,monospace";
+      ctx.font = '12px "Segoe UI","Microsoft YaHei",sans-serif';
       ctx.textAlign = "left";
-      ctx.fillText(z.label, x + 10, z.y0 + 15);
+      ctx.fillText(fitted(z.label, w - 20), x + 10, z.y + 17);
     });
     ctx.restore();
   }
@@ -160,15 +207,17 @@
     /* 分层标题 */
     ctx.font = "10px Consolas,monospace";
     ctx.textAlign = "left";
-    [["L0 · 核心层 Spine", ROW_Y[0]], ["L1 · 接入层 Leaf / 带外", ROW_Y[1]], ["L2 · 服务器（按机柜分组）", ROW_Y[2]]].forEach(([t, y]) => {
+    const headings = [["L0 · 核心层 Spine", 26], ["L1 · 接入层 Leaf / 带外", 120]];
+    if (rackFilter !== "R01") headings.push(["L2 · 服务器（按机柜分组）", 264]);
+    headings.forEach(([t, y]) => {
       ctx.fillStyle = CV.rgba("textDim", .55);
-      ctx.fillText(t, 14, y - 32);
+      ctx.fillText(t, 14, y - 8);
     });
 
     /* 链路 */
     links.forEach(l => {
       const a = nodeMap.get(l.from), b = nodeMap.get(l.to);
-      if (!a || !b) return;
+      if (!a?.visible || !b?.visible) return;
       const lit = !rel || (rel.has(l.from) && rel.has(l.to));
       const col = TC[l.type] || CV.tri("textDim");
       ctx.strokeStyle = `rgba(${col},${lit ? 0.62 : 0.06})`;
@@ -188,10 +237,10 @@
     });
 
     /* 流量粒子 */
-    spawnParticles();
+    if (!REDUCED) spawnParticles();
     particles.forEach(p => {
       const a = nodeMap.get(p.l.from), b = nodeMap.get(p.l.to);
-      if (!a || !b) return;
+      if (!a?.visible || !b?.visible) return;
       p.t += p.v;
       const t = p.dir === 1 ? p.t : 1 - p.t;
       const pt = lerp(a, b, Math.max(0, Math.min(1, t)));
@@ -206,6 +255,7 @@
 
     /* 节点 */
     nodes.forEach(n => {
+      if (!n.visible) return;
       const lit = !rel || rel.has(n.id);
       const col = NC[n.kind] || CV.hex("textFaint");
       ctx.globalAlpha = lit ? 1 : 0.18;
@@ -232,15 +282,15 @@
 
       ctx.textAlign = "left";
       ctx.fillStyle = CV.rgba("textBright", .96);
-      ctx.font = '10.5px Consolas,"Segoe UI",monospace';
+      ctx.font = '12px Consolas,"Segoe UI",monospace';
       const label = n.kind === "server" ? n.ref.id.replace("srv-", "") : n.ref.short;
-      ctx.fillText((GLYPH[n.kind] || "◈") + " " + label, n.x - n.w / 2 + 8, n.y - 2);
+      ctx.fillText(fitted((GLYPH[n.kind] || "◈") + " " + label, n.w - 24), n.x - n.w / 2 + 8, n.y - 3);
       ctx.fillStyle = CV.rgba("textDim", .85);
-      ctx.font = "9px Consolas,monospace";
+      ctx.font = "11px Consolas,monospace";
       const sub = n.kind === "server"
         ? `${n.ref.location.rack} U${n.ref.location.u[0]}` + (n.ref.location.u[1] > n.ref.location.u[0] ? `–${n.ref.location.u[1]}` : "")
         : n.ref.mgmt;
-      ctx.fillText(sub, n.x - n.w / 2 + 8, n.y + 12);
+      ctx.fillText(fitted(sub, n.w - 16), n.x - n.w / 2 + 8, n.y + 14);
       ctx.globalAlpha = 1;
     });
   }
@@ -285,9 +335,11 @@
 
   /* 生命周期：子页激活时布局 + 渲染 */
   AXON.on("servers-tab-net", () => {
+    if (rackFilter && AXON.floorRack && rackFilter !== AXON.floorRack) { rackFilter = AXON.floorRack; renderInventory(); }
     resize();
     if (W) draw();           /* 后台标签页 rAF 暂停时保证至少渲染一帧 */
     renderNetLinks();
+    updateInventoryStates();
     requestAnimationFrame(() => { resize(); draw(); renderNetLinks(); });
     setTimeout(() => { resize(); draw(); }, 120);
   });
@@ -295,6 +347,7 @@
     if (AXON.view !== "servers" || AXON.serversTab !== "net") return;
     links.forEach(l => { l.util = clamp(l.util + rnd(-2.5, 2.6), 2, 94); });
     renderNetLinks();
+    updateInventoryStates();
   });
   new ResizeObserver(() => { if (AXON.serversTab === "net") resize(); }).observe(canvas.parentElement);
   resize();

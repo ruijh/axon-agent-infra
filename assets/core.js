@@ -37,6 +37,15 @@ AXON.toast = function (title, body, type = "info", ms = 3400) {
 };
 
 /* ── 模态确认 ────────────────────────────────────────────── */
+AXON.closeModal = function () {
+  $('#modal-wrap').hidden = true;
+  if (this.modalReturnFocus?.isConnected) this.modalReturnFocus.focus({ preventScroll: true });
+};
+function focusModal() {
+  AXON.modalReturnFocus = document.activeElement;
+  $('#modal-wrap').hidden = false;
+  $('#modal button')?.focus();
+}
 AXON.confirm = function ({ title, html, okText = "确认", danger = false, onOk }) {
   const wrap = $("#modal-wrap"), m = $("#modal");
   m.innerHTML = `<h3>${esc(title)}</h3><p>${html}</p>
@@ -44,8 +53,8 @@ AXON.confirm = function ({ title, html, okText = "确认", danger = false, onOk 
       <button class="btn ghost" data-x>取消</button>
       <button class="btn ${danger ? "danger" : ""}" data-ok>${esc(okText)}</button>
     </div>`;
-  wrap.hidden = false;
-  const close = () => (wrap.hidden = true);
+  focusModal();
+  const close = () => AXON.closeModal();
   $("[data-x]", m).onclick = close;
   $("[data-ok]", m).onclick = () => { close(); onOk && onOk(); };
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
@@ -56,9 +65,9 @@ AXON.yamlView = function (title, text) {
   const wrap = $("#modal-wrap"), m = $("#modal");
   m.innerHTML = `<h3>${esc(title)}</h3><pre class="yaml-pre">${esc(text)}</pre>
     <div class="m-actions"><button class="btn ghost" data-x>关闭</button></div>`;
-  wrap.hidden = false;
-  $("[data-x]", m).onclick = () => (wrap.hidden = true);
-  wrap.onclick = (e) => { if (e.target === wrap) wrap.hidden = true; };
+  focusModal();
+  $("[data-x]", m).onclick = () => AXON.closeModal();
+  wrap.onclick = (e) => { if (e.target === wrap) AXON.closeModal(); };
 };
 
 /* ── 操作中心：opId 三段式（SPEC §4.3 accepted → executed → verified）── */
@@ -92,19 +101,33 @@ AXON.runOp = function (kind, target, label, opts = {}) {
 
 /* ── 抽屉 ────────────────────────────────────────────────── */
 AXON.openDrawer = function (title, buildFn) {
+  if (!$('#drawer').classList.contains('open')) this.drawerReturnFocus = document.activeElement;
   $("#drawer-title").textContent = title;
   const body = $("#drawer-body");
   body.innerHTML = "";
   buildFn(body);
   $("#drawer").classList.add("open");
+  $('#drawer').inert = false;
   $("#drawer").setAttribute("aria-hidden", "false");
   $("#drawer-mask").hidden = false;
+  $('#drawer-close').focus({ preventScroll: true });
 };
 AXON.closeDrawer = function () {
+  const wasOpen = $('#drawer').classList.contains('open');
   $("#drawer").classList.remove("open");
   $("#drawer").setAttribute("aria-hidden", "true");
   $("#drawer-mask").hidden = true;
+  $('#drawer').inert = true;
+  if (wasOpen && this.drawerReturnFocus?.isConnected) this.drawerReturnFocus.focus({ preventScroll: true });
 };
+$('#drawer').addEventListener('keydown', e => {
+  if (e.key !== 'Tab' || !$('#drawer').classList.contains('open') || !$('#modal-wrap').hidden) return;
+  const focusable = $$('button, a[href], input, select, textarea, [tabindex="0"]', $('#drawer'))
+    .filter(n => !n.disabled && n.getClientRects().length);
+  const first = focusable[0], last = focusable.at(-1);
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+});
 
 /* ── 路由 ────────────────────────────────────────────────── */
 AXON.nav = function (view) {
@@ -156,7 +179,18 @@ $("#clock").textContent = fmtClock(new Date());
 /* ── 抽屉/告警 全局事件 ──────────────────────────────────── */
 $("#drawer-close").addEventListener("click", () => AXON.closeDrawer());
 $("#drawer-mask").addEventListener("click", () => AXON.closeDrawer());
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") { AXON.closeDrawer(); $("#modal-wrap").hidden = true; } });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (!$('#modal-wrap').hidden) AXON.closeModal();
+    else AXON.closeDrawer();
+  }
+  if (e.key === 'Tab' && !$('#modal-wrap').hidden) {
+    const items = $$('button, input, select, textarea, a[href]', $('#modal')).filter(n => !n.disabled && n.getClientRects().length);
+    const first = items[0], last = items.at(-1);
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+  }
+});
 $("#alert-pill").addEventListener("click", () => AXON.nav("overview"));
 
 /* ── 模拟数据引擎：每 2s 让平台“活着” ─────────────────────── */

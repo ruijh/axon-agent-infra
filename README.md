@@ -33,7 +33,7 @@ python _serve.py        # 仅公开运行时资源，默认绑定 127.0.0.1:8437
 **测试（SPEC 硬约束的可执行验证）：**
 ```bash
 node --test tests/invariants.test.mjs    # 19 项：451 能力门控 / 409 状态机 / 412 维护前置 / 429 配额 / 幂等 / 权重恒等 100 / GC 保护…
-node --test tests/hardening.test.mjs tests/invariants.test.mjs tests/scene-quality.test.mjs tests/topology.test.mjs tests/control-security.test.mjs tests/interfaces.test.mjs  # 全套 67 项；静态 Python 服务回归需要 Python 3
+node --test tests/hardening.test.mjs tests/invariants.test.mjs tests/scene-quality.test.mjs tests/topology.test.mjs tests/control-security.test.mjs tests/interfaces.test.mjs tests/dc3d-labels.test.mjs tests/net-layout.test.mjs tests/rack-layout.test.mjs  # 全套 80 项；静态 Python 服务回归需要 Python 3
 ```
 
 ### 静态资源边界与数据升级
@@ -121,8 +121,11 @@ assets/core.js      核心引擎：路由 / 时钟 / 2s 模拟数据 tick（含�
 assets/graph.js     拓扑图（2D）：Canvas 布局与绘制、方向箭头与可选粒子、命中检测、拖拽、2D/3D 视图切换；与 topology 共享状态
 assets/topo3d.js    拓扑图（3D）：three.js 正交视图、实例化节点/箭头、屏幕空间标签、按需重绘、pagehide 释放
 assets/topology-*.js 拓扑共享内核：可达闭包分析与状态机 / 工作台与详情面板 / 相机姿态 / 性能诊断（model/state/camera/ui/benchmark，带回归）
-assets/views.js     视图渲染：服务器（清单/平面/机柜）/ 总览 / 资产 / 任务 / 治理 + 手绘 Canvas 图表
-assets/net.js       物理网络拓扑：三层网络 + 机柜分组区 + 流量粒子 + 端口映射表
+assets/views.js     视图渲染：服务器（清单/平面/机柜）/ 总览 / 资产 / 任务 / 治理 + 手绘 Canvas 图表；统一资产抽屉入口 openRack / openRackDevice
+assets/rack-layout.js 42U 共享几何：标准/详情双密度、设备 U 位与标签计算（含回归）
+assets/net.js       物理网络拓扑：三层网络 + 机柜分组区 + 机柜过滤与设备清单 + 流量粒子 + 端口映射表；布局由 net-layout.js 提供并复用测试
+assets/net-layout.js 确定性网络布局 / 文本省略 / 命中检测（纯函数，含回归）
+assets/dc3d-labels.js 3D 机柜标签屏幕空间避让策略（实测尺寸 + 预留 HUD 边界，含回归）
 assets/dc3d.js      数据中心 3D 视图（three.js WebGL）：加载 Blender 导出的 glTF 模型、PBR 光照/阴影/Bloom、U 位设备状态发光、拾取交互（机柜选中 / 设备直达抽屉）
 assets/themes.js    主题系统：8 套全站调色板（含 3D 视图联动换色）与本地记忆
 assets/flow.js      维护编排向导状态机（完成后联动服务器槽位与告警）

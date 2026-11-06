@@ -1,0 +1,74 @@
+{
+  "status": "complete",
+  "durationMs": 14315,
+  "viewport": [
+    1116,
+    618
+  ],
+  "pixelRatio": 1,
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+  "metrics": [
+    {
+      "view": "overview",
+      "samples": 240,
+      "cpuMs": {
+        "p50": 2.4,
+        "p95": 3.5
+      },
+      "frameIntervalMs": {
+        "p50": 17.6,
+        "p95": 19.4
+      },
+      "calls": {
+        "p50": 285,
+        "max": 290
+      },
+      "triangles": {
+        "max": 72042
+      }
+    },
+    {
+      "view": "aisle",
+      "samples": 240,
+      "cpuMs": {
+        "p50": 2.6,
+        "p95": 3.9
+      },
+      "frameIntervalMs": {
+        "p50": 17.7,
+        "p95": 19.3
+      },
+      "calls": {
+        "p50": 418,
+        "max": 421
+      },
+      "triangles": {
+        "max": 185082
+      }
+    },
+    {
+      "view": "rack",
+      "samples": 240,
+      "cpuMs": {
+        "p50": 2.1,
+        "p95": 3.1
+      },
+      "frameIntervalMs": {
+        "p50": 17.7,
+        "p95": 19.1
+      },
+      "calls": {
+        "p50": 320,
+        "max": 322
+      },
+      "triangles": {
+        "max": 135152
+      }
+    }
+  ],
+  "resources": {
+    "textures": 24,
+    "geometries": 308,
+    "programs": 17
+  }
+}

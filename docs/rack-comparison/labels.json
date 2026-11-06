@@ -1,0 +1,26 @@
+[
+  {
+    "labelOverlap": false,
+    "shown": 10,
+    "uiOverlap": false,
+    "view": "overview"
+  },
+  {
+    "labelOverlap": false,
+    "shown": 6,
+    "uiOverlap": false,
+    "view": "aisle"
+  },
+  {
+    "labelOverlap": false,
+    "shown": 4,
+    "uiOverlap": false,
+    "view": "room"
+  },
+  {
+    "labelOverlap": false,
+    "shown": 1,
+    "uiOverlap": false,
+    "view": "rack"
+  }
+]

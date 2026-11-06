@@ -16,6 +16,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { applyEnvironment, disposeEnvironment } from "./env3d.js";
 import { showDetail, rackView, visibleInTree, pickHit } from "./dc3d-policy.js";
 import { installBenchmark } from "./scene-benchmark.js";
+import { placeRackLabels } from "./dc3d-labels.js";
 
 (function () {
   const canvas = $("#dc3d-canvas");
@@ -161,9 +162,15 @@ import { installBenchmark } from "./scene-benchmark.js";
   }
   function focusRack(id) {
     if (!rackGroups.has(id)) return;
-    focusedRack = id; selId = id;
-    $("#dc3d-rack-select").value = id;
+    focusedRack = id; selectRack(id);
     setView("rack");
+  }
+  function selectRack(id) {
+    selId = id;
+    if (id) {
+      $("#dc3d-rack-select").value = id;
+      if (D.racks.some(r => r.id === id)) AXON.floorRack = id;
+    }
   }
   function setView(name) {
     if (!views[name]) return;
@@ -269,10 +276,12 @@ import { installBenchmark } from "./scene-benchmark.js";
       label.className = "dc3d-label";
       label.textContent = rk.id + (rk.hasWarn ? " · 预警" : "");
       label.dataset.managed = rk.managed;
+      label.type = "button";
       label.setAttribute("aria-label", `查看机柜 ${rk.id}${rk.hasWarn ? " · 硬件预警" : ""}`);
-      label.addEventListener("click", () => { selId = rk.id; renderHud(); invalidate(); });
+      label.setAttribute("aria-pressed", "false");
+      label.addEventListener("click", () => { selectRack(rk.id); renderHud(); invalidate(); });
       $("#dc3d-labels").append(label);
-      rackLabels.push({ el: label, position: wp.clone().add(new THREE.Vector3(0, 2.18, 0)), id: rk.id });
+      rackLabels.push({ el: label, position: wp.clone().add(new THREE.Vector3(0, 2.18, 0)), id: rk.id, hasWarn: rk.hasWarn });
 
 
     });
@@ -315,6 +324,7 @@ import { installBenchmark } from "./scene-benchmark.js";
     scene.add(root);
     ready = true;
     applyDevGlow();
+    if (D.racks.some(r => r.id === AXON.floorRack)) { selectRack(AXON.floorRack); focusedRack = AXON.floorRack; }
     setView(new URLSearchParams(location.search).get("dcCamera") || "overview");
     canvas.dataset.ready = "true";
     if (new URLSearchParams(location.search).has("dcCamera")) {
@@ -330,9 +340,11 @@ import { installBenchmark } from "./scene-benchmark.js";
     if(next===statusSignature)return;statusSignature=next;
     for(const label of rackLabels){
       const warn=rackStats(label.id).hasWarn;
+      label.hasWarn=warn;
       label.el.textContent=label.id+(warn?' · 预警':'');
       label.el.setAttribute('aria-label',`查看机柜 ${label.id}${warn?' · 硬件预警':''}`);
     }
+    labelMeasurementsDirty=true;
     applyDevGlow();renderHud();invalidate();
   });
 
@@ -386,6 +398,7 @@ import { installBenchmark } from "./scene-benchmark.js";
   /* ── HUD / 图例（数据口径与设备清单一致）────────────── */
   function renderHud() {
     if (!hud) return;
+    labelMeasurementsDirty = true;
     if (!ready) {
       hud.innerHTML = `<div class="h-title">A2 机房</div><div class="h-kv">正在加载 Blender 模型…</div>`;
       return;
@@ -413,21 +426,23 @@ import { installBenchmark } from "./scene-benchmark.js";
     hud.innerHTML = `<div class="h-title">${esc(meta.name)} · ${esc(meta.note)}</div>
       <div class="h-kv">位置：A2 机房 · 03 列 ${rk.id}（U 位见「机柜部署」）</div>
       <div class="h-kv">已用 ${st.usedU}U / 42U · ${st.devs.length} 台设备${st.hasWarn ? ' · <span style="color:var(--warn)">存在硬件预警</span>' : ""}</div>
-      <div style="margin:6px 0 2px">${st.devs.map(m =>
-        `<span class="dep-chip" data-3d-dev="${m.ref.id}" data-kind="${m.kind}">${esc(m.ref.name.replace(" · ", " "))}</span>`).join("")}</div>
+      <div class="dc3d-dev-list" aria-label="机柜设备">${[...st.devs].sort((a,b)=>b.ref.location.u[1]-a.ref.location.u[1]).map(m => {
+        const [start,end]=m.ref.location.u, u=start===end?`U${start}`:`U${start}–${end}`;
+        const status=({ok:"正常",warn:"硬件预警",maint:"维护中",off:"已关闭"})[m.ref.state]||m.ref.state||"状态未知";
+        return `<button type="button" class="dc3d-dev" data-3d-dev="${esc(m.ref.id)}" aria-label="查看 ${esc(m.ref.name)}，${u}，${esc(status)}">
+          <span class="dc3d-dev-name">${esc(m.ref.name)}</span><span class="dc3d-dev-meta">${u} · ${esc(status)} · ${esc(m.ref.role)}</span></button>`;
+      }).join("")}</div>
       <button class="btn tiny" id="dc3d-open-rack">查看机柜 U 位</button>
       <button class="btn tiny" id="dc3d-inspect-rack">近看 ${esc(rk.id)}</button>`;
     $("#dc3d-inspect-rack").onclick = () => focusRack(rk.id);
-    $$("#dc3d-hud [data-3d-dev]").forEach(ch => ch.addEventListener("click", () => openDev(ch.dataset["3dDev"], ch.dataset.kind)));
-    $("#dc3d-open-rack").onclick = () => { AXON.serversTab = "rack"; renderServersTab(); };
+    $$("#dc3d-hud [data-3d-dev]").forEach(ch => ch.addEventListener("click", () => openDev(ch.dataset["3dDev"])));
+    $("#dc3d-open-rack").onclick = () => AXON.openRack(rk.id);
   }
 
-  function openDev(id, kind) {
-    if (kind === "server") AXON.emit("server-detail", id);
-    else {
-      const n = D.find(id);
-      AXON.toast(n.name, `${esc(n.model)} · ${esc(n.role)} · 管理口 ${esc(n.mgmt)}`, "info", 3800);
-    }
+  function openDev(id) {
+    const device = D.find(id);
+    if (device?.location?.rack) selectRack(device.location.rack);
+    AXON.openRackDevice(id);
   }
 
   $("#dc3d-legend").innerHTML =
@@ -477,8 +492,8 @@ import { installBenchmark } from "./scene-benchmark.js";
     downPos = null;
     if (moved > 5 || !active() || !ready) return;
     const hit = pick(e.clientX, e.clientY);
-    if (hit && hit.devId) { openDev(hit.devId, devKind(hit.devId)); return; }
-    selId = hit ? hit.rackId : null;
+    if (hit && hit.devId) { openDev(hit.devId); renderHud(); invalidate(); return; }
+    selectRack(hit ? hit.rackId : null);
     renderHud();
     invalidate();
   });
@@ -487,12 +502,6 @@ import { installBenchmark } from "./scene-benchmark.js";
     setHover(pick(e.clientX, e.clientY));
   });
   canvas.addEventListener("pointerleave", () => setHover(null));
-
-  function devKind(id) {
-    if (D.servers.some(s => s.id === id)) return "server";
-    const n = D.netDevices.find(x => x.id === id);
-    return n && n.kind === "bmc" ? "bmc" : "net";
-  }
 
   /* Render only when the camera or scene changes; hidden tabs never draw. */
   const active = () => AXON.view === "servers" && AXON.serversTab === "3d" && !document.hidden;
@@ -509,16 +518,39 @@ import { installBenchmark } from "./scene-benchmark.js";
     camera.aspect = w / h; camera.updateProjectionMatrix(); invalidate();
   }
   const projected = new THREE.Vector3();
+  let labelMeasurementsDirty = true, labelReserved = [];
+  const overlayElements = [hud, $(".dc3d-views"), $("#dc3d-legend")].filter(Boolean);
+  function measureLabels() {
+    // Measure only after layout, text, theme or font changes. Batch DOM writes,
+    // then reads; camera animation never performs per-label layout reads.
+    rackLabels.forEach(({el}) => { el.hidden = false; el.style.visibility = "hidden"; });
+    const origin = canvas.getBoundingClientRect();
+    rackLabels.forEach(label => {
+      const bounds = label.el.getBoundingClientRect(); label.w = bounds.width; label.h = bounds.height;
+    });
+    labelReserved = overlayElements.map(el => {
+      const r = el.getBoundingClientRect();
+      return { left:r.left-origin.left, right:r.right-origin.left, top:r.top-origin.top, bottom:r.bottom-origin.top, w:r.width, h:r.height };
+    }).filter(r => r.w > 0 && r.h > 0);
+    labelMeasurementsDirty = false;
+  }
   function updateLabels() {
-    const occupied = [];
-    rackLabels.forEach(({ el, position, id }) => {
+    if (labelMeasurementsDirty) measureLabels();
+    const candidates = [];
+    rackLabels.forEach(({ el, position, id, w, h, hasWarn }) => {
       projected.copy(position).project(camera);
       const x = (projected.x + 1) * W / 2, y = (1 - projected.y) * H / 2;
-      const inView = projected.z > -1 && projected.z < 1 && x > 20 && x < W - 20 && y > 58 && y < H - 45;
+      const inView = projected.z > -1 && projected.z < 1;
       const nearView = (currentView === "rack" && id !== focusedRack) || !rackGroups.get(id)?.visible;
-      const collides = occupied.some(p => Math.abs(x - p.x) < 48 && Math.abs(y - p.y) < 24);
-      el.hidden = !inView || nearView || collides;
-      if (!el.hidden) { el.style.left = x + "px"; el.style.top = y + "px"; occupied.push({ x, y }); }
+      if (inView && !nearView) candidates.push({id,x,y,w,h,priority:el===document.activeElement?2000:id===selId?1000:hasWarn?100:el.dataset.managed==="true"?10:0});
+    });
+    const positions = new Map(placeRackLabels(candidates, W, H, labelReserved).shown.map(p => [p.id,p]));
+    rackLabels.forEach(({el,id}) => {
+      const p = positions.get(id);
+      if (!p && document.activeElement === el) $("#dc3d-rack-select").focus({preventScroll:true});
+      el.hidden = !p; el.style.visibility = "";
+      el.setAttribute("aria-pressed", String(id === selId));
+      if (p) { el.style.left = p.x + "px"; el.style.top = p.y + "px"; }
     });
   }
   let renderedFrames = 0, benchmark;
@@ -553,7 +585,7 @@ import { installBenchmark } from "./scene-benchmark.js";
     diagnostics = document.createElement("output");
     diagnostics.id = "dc3d-diagnostics";
     diagnostics.style.cssText = "display:block;font:11px monospace;overflow-wrap:anywhere";
-    canvas.parentElement.after(diagnostics);
+    canvas.closest('.dc3d-wrap').after(diagnostics);
     const benchContainer = document.createElement("div"); diagnostics.after(benchContainer);
     benchmark = installBenchmark({ renderer, canvas, container: benchContainer, active, ready: () => ready,
       setView, getView: () => currentView, invalidate,
@@ -561,15 +593,25 @@ import { installBenchmark } from "./scene-benchmark.js";
     });
   }
   function loop() { if (stopped) return; raf = requestAnimationFrame(loop); frame(); }
-  AXON.on("servers-tab-3d", () => { setHover(null); resize(); renderHud(); invalidate(); });
+  AXON.on("servers-tab-3d", () => {
+    if (D.racks.some(r => r.id === AXON.floorRack)) {
+      const changed = AXON.floorRack !== selId || AXON.floorRack !== focusedRack;
+      selectRack(AXON.floorRack); focusedRack = AXON.floorRack;
+      if (currentView === "rack" && changed) focusRack(focusedRack);
+    }
+    setHover(null); resize(); renderHud(); invalidate();
+  });
   AXON.on("view", invalidate);
   document.addEventListener("visibilitychange", invalidate);
-  const resizeObserver = new ResizeObserver(() => { if (active()) resize(); });
+  const resizeObserver = new ResizeObserver(() => { labelMeasurementsDirty = true; if (active()) { resize(); invalidate(); } });
   resizeObserver.observe(canvas.parentElement);
+  overlayElements.forEach(el => resizeObserver.observe(el));
+  document.fonts?.ready.then(() => { labelMeasurementsDirty = true; invalidate(); });
   resize(); renderHud(); raf = requestAnimationFrame(loop);
 
   // Physical materials, lights and environment remain neutral across all UI themes.
   function applyPalette() {
+    labelMeasurementsDirty = true;
     selRing.material.color.set(CV.num("accent"));
     rackBodyMats.forEach(mats => mats.forEach(({ mat }) => mat.emissive.set(CV.num("accent"))));
     if (ready) applyDevGlow();
